@@ -20,7 +20,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import type { AppSettings, LoginResponse, SettingsResponse } from '@/lib/types'
-import { api, getErrorMessage } from '@/lib/api'
+import { api, getErrorMessage, clearAuthToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -219,6 +219,7 @@ export default function SettingsView() {
     } catch {
       // ignore — clear local session regardless
     }
+    clearAuthToken()
     setUser(null)
     replace('login')
   }

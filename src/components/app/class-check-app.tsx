@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { ThemeProvider } from 'next-themes'
 import { useAppStore } from '@/lib/store'
-import { api, getErrorMessage } from '@/lib/api'
+import { api, getErrorMessage, clearAuthToken, setUnauthorizedHandler } from '@/lib/api'
 import { flushQueue, pendingCount } from '@/lib/offline'
 import { OfflineError } from '@/lib/api'
 import { toast } from 'sonner'
@@ -44,6 +44,7 @@ function ClassCheckInner() {
     setUser,
     setOnline,
     setPendingSync,
+    setOpenSession,
     replace,
   } = useAppStore()
 
@@ -73,6 +74,17 @@ function ClassCheckInner() {
     window.addEventListener('online', updateOnline)
     window.addEventListener('offline', updateOnline)
 
+    // Any 401 means the session is gone — return to the login screen.
+    setUnauthorizedHandler(() => {
+      const hadUser = useAppStore.getState().user !== null
+      clearAuthToken()
+      const s = useAppStore.getState()
+      s.setUser(null)
+      s.setOpenSession(null)
+      s.replace('login')
+      if (hadUser) toast.error('Your session has expired — please sign in again')
+    })
+
     ;(async () => {
       try {
         const { user } = await api<{ user: import('@/lib/types').User | null }>('/api/auth/me')
@@ -81,6 +93,8 @@ function ClassCheckInner() {
           setUser(user)
           replace(user.onboarded ? 'home' : 'onboarding')
         } else {
+          // No valid session (cookie blocked / token expired) — clean slate.
+          clearAuthToken()
           replace('login')
         }
       } catch (e) {
@@ -99,8 +113,9 @@ function ClassCheckInner() {
       alive = false
       window.removeEventListener('online', updateOnline)
       window.removeEventListener('offline', updateOnline)
+      setUnauthorizedHandler(null)
     }
-  }, [setBooted, setUser, setOnline, setPendingSync, replace])
+  }, [setBooted, setUser, setOnline, setPendingSync, replace, setOpenSession])
 
   if (!booted) {
     return (

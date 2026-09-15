@@ -89,8 +89,20 @@ export function parseCookieHeader(header: string | null): Record<string, string>
   return out
 }
 
-/** Load the authenticated user (incl. department) from the request cookie, or null. */
+/** Load the authenticated user (incl. department) from the request, or null. */
 export async function getSessionUser(req: Request): Promise<AuthUser | null> {
+  // 1) Authorization: Bearer <jwt> — required inside cross-origin preview
+  //    iframes, where browsers block SameSite cookies entirely.
+  const authHeader = req.headers.get('authorization')
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    const payload = await verifyToken(authHeader.slice(7).trim())
+    if (!payload) return null
+    return await db.user.findUnique({
+      where: { id: payload.sub },
+      include: { department: true },
+    })
+  }
+  // 2) httpOnly cookie — used by the installed PWA / top-level browsing.
   const token = parseCookieHeader(req.headers.get('cookie'))[AUTH_COOKIE_NAME]
   if (!token) return null
   const payload = await verifyToken(token)

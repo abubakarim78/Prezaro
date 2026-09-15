@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Eye, EyeOff, Loader2, ScanFace } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, ApiError, getErrorMessage } from '@/lib/api'
+import { api, ApiError, getErrorMessage, setAuthToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -41,10 +41,12 @@ export default function LoginView() {
     setLoading(true)
     setFormError(null)
     try {
-      const { user } = await api<LoginResponse>('/api/auth/login', {
+      const { user, token } = await api<LoginResponse>('/api/auth/login', {
         method: 'POST',
         body: { email: em, password: pw },
       })
+      // Store the bearer token — cookies can be blocked in embedded contexts.
+      if (token) setAuthToken(token)
       setUser(user)
       replace(user.onboarded ? 'home' : 'onboarding')
     } catch (err) {

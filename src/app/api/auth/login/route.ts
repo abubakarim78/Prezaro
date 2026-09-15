@@ -30,7 +30,9 @@ export async function POST(req: Request) {
     }
 
     const token = await signToken({ sub: user.id })
-    const res = NextResponse.json({ user: userDTO(user) })
+    // Token is also returned in the body so clients in cookie-blocked
+    // contexts (cross-origin preview iframes) can use bearer auth.
+    const res = NextResponse.json({ user: userDTO(user), token })
     return setAuthCookie(res, token)
   })
 }

@@ -145,10 +145,12 @@ export interface AppSettings {
 
 export interface LoginResponse {
   user: User
+  token?: string
 }
 
 export interface MeResponse {
   user: User | null
+  token?: string
 }
 
 export interface StudentsResponse {

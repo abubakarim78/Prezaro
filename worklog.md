@@ -80,3 +80,23 @@ Work Log:
 
 Stage Summary:
 - ClassCheck v1 is complete and browser-verified. All PRD Phase-1 features implemented: face enrollment w/ consent, walkthrough + kiosk scanning, passive liveness (kiosk head-turn challenge), QR+PIN fallback, offline queue + roster cache, manual override via review, lecturer + department dashboards, CSV exports, at-risk thresholds, installable PWA with offline shell.
+
+---
+Task ID: 8
+Agent: Z.ai (orchestrator)
+Task: Fix widespread 401 "Unauthorized" errors in the preview panel.
+
+Work Log:
+- Diagnosis via dev.log: POST /api/auth/login 200 immediately followed by 401s on every data endpoint. Root cause: the app runs inside a cross-origin preview iframe (preview-chat-*.space-z.ai); browsers block SameSite=Lax cookie storage/sending in third-party contexts, so login succeeded (user JSON in body) but the session cookie never persisted — every subsequent fetch was unauthenticated.
+- Fix — dual-mode auth (bearer + cookie):
+  - src/lib/auth.ts: getSessionUser() now checks `Authorization: Bearer` first, then falls back to the cc_token cookie.
+  - login route: returns { user, token } in the body (cookie still set for installed-PWA/top-level use).
+  - me route: returns { user, token } and mints a fresh token so cookie-capable boots also seed bearer mode.
+  - src/lib/api.ts: token helpers (get/set/clearAuthToken in localStorage key cc_auth_token), attaches Authorization header to every request, global setUnauthorizedHandler() hook fired on any 401 (clears token).
+  - login.tsx: persists token from login response.
+  - class-check-app.tsx: registers 401 handler (clear token → setUser(null) → replace('login') → "Session expired" toast, only when a user was logged in); clears stale token on boot when /me returns null.
+  - shell.tsx + settings.tsx logout: clearAuthToken() so the 30d JWT can't silently re-login.
+- Verified: bun run lint clean, tsc clean. curl: login→token, bearer → 200 on courses/sessions/me, no-auth → 401. Browser E2E: login → home with live data; COOKIES CLEARED + reload → still logged in via bearer (exact iframe scenario); zero 401s / zero console errors; sign-out clears token (cc_auth_token: null) and returns to login; re-login clean.
+
+Stage Summary:
+- Auth now works in all contexts: preview iframe (bearer), top-level & installed PWA (bearer seeded from first cookie login). User's stuck state self-heals on reload: /me returns null → clean login screen → sign in once → token stored.

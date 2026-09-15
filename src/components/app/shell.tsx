@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { api } from '@/lib/api'
+import { api, clearAuthToken } from '@/lib/api'
 import { pendingCount } from '@/lib/offline'
 import { toast } from 'sonner'
 
@@ -82,6 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    clearAuthToken()
     setUser(null)
     replace('login')
     toast('Signed out')
