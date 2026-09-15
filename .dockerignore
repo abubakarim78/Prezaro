@@ -1,0 +1,19 @@
+# keep the build context lean; deploy/ must stay included
+node_modules
+.next
+db
+tests
+docs
+examples
+skills
+mini-services
+tool-results
+agent-ctx
+upload
+download
+*.log
+.env
+.env.*
+!.env.example
+.git
+worklog.md

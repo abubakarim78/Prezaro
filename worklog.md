@@ -164,3 +164,17 @@ Work Log:
 
 Stage Summary:
 - Two manual paths now exist: (1) DURING class — "Add manually" sheet in the live scan screen (search + tap, multi-add, works offline and with camera broken); (2) AT END — review screen P/L/A override before submitting. This fully replaces the removed PIN as the fallback for face opt-outs / failed matches, with zero credentials to manage.
+
+---
+Task ID: 13
+Agent: Z.ai (orchestrator)
+Task: "Move on" — production deployment kit + DB housekeeping (removed E2E test sessions).
+
+Work Log:
+- Verified config: next.config.ts already has output:"standalone"; package.json build script copies .next/static + public into standalone (bun .next/standalone/server.js start path); prisma is a runtime dep; auth-secret fallback path cwd/db/.auth-secret aligns with the planned /app/db volume.
+- Created deploy/ kit: Dockerfile (oven/bun:1, bun install --frozen-lockfile -> prisma generate -> bun run build -> standalone runtime, VOLUME /app/db); entrypoint.sh (mkdir db -> prisma db push -> bootstrap -> exec bun .next/standalone/server.js); bootstrap.ts (creates FIRST admin user from BOOTSTRAP_EMAIL/PASSWORD/NAME/DEPARTMENT only when users table is empty — no demo seed in prod, department upserted with initials code); docker-compose.yml (app + named volume classcheck-db:/app/db + healthcheck + optional caddy:2-alpine --profile https sidecar with DOMAIN env for auto-HTTPS); deploy/Caddyfile ({$DOMAIN} -> reverse_proxy app:3000); root .dockerignore (excludes node_modules/.next/db/.env/logs/tests/examples/skills/etc, keeps deploy/).
+- Validated: compose YAML parses, entrypoint passes sh -n, tsc + eslint clean (bootstrap.ts included).
+- DB housekeeping: deleted the 2 automation test sessions (CS301 1/38 from Task 7 E2E, CS301 3/38 from Task 12 E2E) with their 76 records via sqlite3; back to exactly the 48 seeded demo sessions; API re-verified (login + sessions list OK).
+
+Stage Summary:
+- One-command deployment is ready: on any Linux host with Docker + a domain, `cd deploy && DOMAIN=... BOOTSTRAP_EMAIL=... BOOTSTRAP_PASSWORD=... AUTH_SECRET=... docker compose --profile https up -d --build` gives HTTPS ClassCheck with a persistent volume; PWA is installable from the domain; face enrollment/camera + future WebAuthn fingerprint (Phase 2) work there. Prod DB starts clean (no demo data) — admin bootstraps, then imports real students via CSV and creates real courses.

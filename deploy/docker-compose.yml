@@ -1,0 +1,52 @@
+name: classcheck
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # SQLite lives on the volume so data survives redeploys
+      DATABASE_URL: file:/app/db/custom.db
+      # Set a fixed secret (openssl rand -base64 32) so JWTs survive image updates.
+      # If left empty the app generates + persists one to /app/db/.auth-secret.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      # First-run admin (only used while the users table is empty)
+      BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      BOOTSTRAP_NAME: ${BOOTSTRAP_NAME:-}
+      BOOTSTRAP_DEPARTMENT: ${BOOTSTRAP_DEPARTMENT:-}
+    volumes:
+      - classcheck-db:/app/db
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Optional automatic-HTTPS reverse proxy.
+  # Enable with:  DOMAIN=attendance.youruniversity.edu docker compose --profile https up -d
+  caddy:
+    image: caddy:2-alpine
+    profile: https
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  classcheck-db:
+  caddy-data:
+  caddy-config:
