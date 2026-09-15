@@ -7,7 +7,6 @@ export type Role = 'LECTURER' | 'ADMIN'
 export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
-export type CheckInMethod = 'FACE' | 'QR' | 'PIN' | 'MANUAL'
 
 export interface User {
   id: string
@@ -67,8 +66,6 @@ export interface RosterEntry {
   firstName: string
   lastName: string
   level: number
-  pin: string
-  qrPayload: string
   descriptors: number[][]
 }
 
@@ -92,7 +89,6 @@ export interface AttendanceRecord {
   code?: string
   name?: string
   status: AttendanceStatus
-  method: CheckInMethod
   confidence?: number | null
   markedAt: string
 }

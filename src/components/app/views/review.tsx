@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/lib/store'
 import { api, getErrorMessage } from '@/lib/api'
 import { getCachedRoster, pendingForSession } from '@/lib/offline'
-import type { AttendanceRecord, AttendanceStatus, CheckInMethod, RosterEntry, SessionDetail } from '@/lib/types'
+import type { AttendanceRecord, AttendanceStatus, RosterEntry, SessionDetail } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
@@ -33,24 +33,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { AttendanceRing, IdentityAvatar, LoadingBlock, MethodBadge } from '@/components/app/shared'
+import { AttendanceRing, IdentityAvatar, LoadingBlock } from '@/components/app/shared'
 
 type RowStatus = AttendanceStatus
-type Method = CheckInMethod
 
 interface Row {
   studentId: string // DB id
   code: string // index number
   name: string
   status: RowStatus
-  method: Method
   confidence?: number | null
   markedAt: string
-  manual: boolean
-}
-
-function methodRank(m: Method): number {
-  return { FACE: 0, QR: 1, PIN: 2, MANUAL: 3 }[m]
 }
 
 export default function ReviewView() {
@@ -103,7 +96,6 @@ export default function ReviewView() {
             studentId: p.studentId,
             name: p.name,
             status: p.status,
-            method: p.method,
             confidence: p.confidence ?? null,
             markedAt: p.markedAt,
           })
@@ -118,10 +110,8 @@ export default function ReviewView() {
           code: st.studentId,
           name: `${st.firstName} ${st.lastName}`,
           status: rec ? rec.status : 'ABSENT',
-          method: rec ? rec.method : 'MANUAL',
           confidence: rec?.confidence ?? null,
           markedAt: rec?.markedAt ?? nowISO,
-          manual: false,
         }
       })
 
@@ -134,10 +124,8 @@ export default function ReviewView() {
             code: rec.code ?? rec.studentId,
             name: rec.name ?? rec.studentId,
             status: rec.status,
-            method: rec.method,
             confidence: rec.confidence ?? null,
             markedAt: rec.markedAt,
-            manual: false,
           })
         }
       }
@@ -185,7 +173,7 @@ export default function ReviewView() {
       prev.map((r) => {
         if (r.studentId !== studentId) return r
         if (r.status === status) return r
-        return { ...r, status, method: 'MANUAL', manual: true }
+        return { ...r, status }
       })
     )
   }
@@ -197,7 +185,6 @@ export default function ReviewView() {
       const records: AttendanceRecord[] = rows.map((r) => ({
         studentId: r.studentId,
         status: r.status,
-        method: r.manual ? 'MANUAL' : r.method,
         confidence: r.confidence ?? null,
         markedAt: r.markedAt,
       }))
@@ -376,9 +363,6 @@ export default function ReviewView() {
                   <p className="text-sm font-medium truncate">{r.name}</p>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-[11px] text-muted-foreground font-mono">{r.code}</span>
-                    {r.method !== 'MANUAL' && !r.manual && r.status !== 'ABSENT' && (
-                      <MethodBadge method={r.method} />
-                    )}
                   </div>
                 </div>
                 <StatusSegment

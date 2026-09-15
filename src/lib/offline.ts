@@ -6,7 +6,7 @@
 // ============================================================
 
 import { api } from './api'
-import type { AttendanceRecord, CheckInMethod, AttendanceStatus } from './types'
+import type { AttendanceRecord, AttendanceStatus } from './types'
 
 const KEY = 'classcheck.pending.v1'
 
@@ -15,7 +15,6 @@ export interface PendingRecord {
   studentId: string
   name?: string
   status: AttendanceStatus
-  method: CheckInMethod
   confidence?: number | null
   markedAt: string
 }
@@ -86,7 +85,6 @@ export async function flushQueue(): Promise<number> {
           records: records.map<AttendanceRecord>((r) => ({
             studentId: r.studentId,
             status: r.status,
-            method: r.method,
             confidence: r.confidence ?? null,
             markedAt: r.markedAt,
           })),
@@ -101,7 +99,7 @@ export async function flushQueue(): Promise<number> {
   return synced
 }
 
-/** Local roster cache so scanning + QR/PIN fallback work offline. */
+/** Local roster cache so face scanning works offline. */
 const ROSTER_KEY = 'classcheck.roster.v1'
 
 export interface CachedRoster {
@@ -113,8 +111,6 @@ export interface CachedRoster {
     firstName: string
     lastName: string
     level: number
-    pin: string
-    qrPayload: string
     descriptors: number[][]
   }[]
 }

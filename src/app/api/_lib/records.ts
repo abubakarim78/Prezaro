@@ -10,7 +10,6 @@ import { db } from '@/lib/db'
 export const recordInputSchema = z.object({
   studentId: z.string().min(1, 'studentId is required'),
   status: z.enum(['PRESENT', 'LATE', 'ABSENT']).default('PRESENT'),
-  method: z.enum(['FACE', 'QR', 'PIN', 'MANUAL']).default('FACE'),
   confidence: z.number().min(0).max(1).nullable().optional(),
   markedAt: z.string().optional(),
 })
@@ -62,7 +61,6 @@ export async function applyRecords(
     if (prev && markedAt.getTime() <= prev.getTime()) continue // stale, latest wins
     const data = {
       status: rec.status,
-      method: rec.method,
       confidence: rec.confidence ?? null,
       markedAt,
     }

@@ -116,3 +116,21 @@ Work Log:
 Stage Summary:
 - Student IDs now accept the department's real format PHA/0001/26 everywhere (dialog, CSV import, API, QR payloads use | delimiter so / is safe).
 - Auth secret no longer depends on .env surviving sandbox restarts; tokens issued before the reset still validate.
+
+---
+Task ID: 10
+Agent: Z.ai (orchestrator)
+Task: Remove QR + PIN check-in entirely — app is now face-recognition-only per user decision.
+
+Work Log:
+- Schema: dropped Student.pin and AttendanceRecord.method (prisma db push --accept-data-loss + generate).
+- Backend: deleted /api/students/[id]/qr route; removed randomPin + pin from student creation (single+bulk); removed qrPayloadFor from helpers; removed pin/qrPayload from roster response; removed method from recordInputSchema/applyRecords/attendanceRecordDTO; removed Method column from session CSV export.
+- Frontend: scan.tsx 1515→1275 lines — removed Face/QR/PIN tab strip, jsQR decode loop (qrStep), QrGuide reticle, PIN drawer, camera-off→PIN fallback ("Continue without camera"), kiosk footer QR/PIN buttons (now has End & review like walkthrough); checkIn() signature simplified to (entry, distance?). Removed MethodBadge from shared.tsx, method breakdown + badges from session.tsx, method/manual tracking from review.tsx (P/L/A override remains, rows no longer carry method), QR & PIN card from student.tsx, QR sheets dialog + menu item from students.tsx (870→664 lines), home subtitle → "Scan faces", settings copy updated.
+- Libs: removed CheckInMethod type, RosterEntry.pin/qrPayload, AttendanceRecord.method, PendingRecord.method, CachedRoster.pin/qrPayload.
+- Deps uninstalled: qrcode, @types/qrcode, jsqr.
+- Stale-Prisma-client issue: after db push, running dev server still queried Student.pin → 500 on roster; fixed by dev server restart (generated client was current).
+- Browser E2E verified: home hero "Take attendance · Scan faces"; scan select (course + Walkthrough/Kiosk only); live screen = counter + camera card (Retry only, sandbox has no camera) + End & review, no tabs; review screen 38-student roster with P/L/A controls, no method badges; discard works, 0 OPEN sessions; Add menu = New student + Import CSV only; student detail has no QR & PIN card. API: student create response has no pin; roster/session records clean. lint + tsc clean, 0 errors in dev.log.
+- NOTE: 2 extra students in DB (PHA/0001/26, PHA/0025/26 — Abubakari Mahamudu) are the USER's own test entries created from the preview panel; preserved.
+
+Stage Summary:
+- ClassCheck is now a single-method face attendance app: enroll faces → scan (walkthrough/kiosk + liveness) → review/override → finalize → CSV export. No biometric-adjacent fallback surface, no PIN/QR credentials to manage.

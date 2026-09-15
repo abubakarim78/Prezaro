@@ -179,7 +179,7 @@ export default function HomeView() {
             <span className="min-w-0 flex-1 text-left">
               <span className="block text-lg font-bold tracking-tight">Take attendance</span>
               <span className="mt-0.5 block text-xs text-primary-foreground/75">
-                Scan faces · QR · PIN
+                Scan faces
               </span>
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-primary-foreground/70 transition-transform group-hover:translate-x-0.5" />

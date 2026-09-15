@@ -4,11 +4,10 @@ import { requireUser } from '@/lib/auth'
 import {
   handle,
   parseDescriptorJson,
-  qrPayloadFor,
   requireCourse,
 } from '../../../_lib/helpers'
 
-/** Roster with descriptors + PINs for on-device matching (face/QR/PIN offline). */
+/** Roster with face descriptors for on-device matching (offline-capable). */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const user = await requireUser(req)
@@ -32,8 +31,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         firstName: s.firstName,
         lastName: s.lastName,
         level: s.level,
-        pin: s.pin,
-        qrPayload: qrPayloadFor(s),
         descriptors: parseDescriptorJson(s.descriptorsJson),
       }))
     return NextResponse.json({

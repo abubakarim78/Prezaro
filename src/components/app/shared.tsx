@@ -3,8 +3,7 @@
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { ScanFace, QrCode, Keyboard, UserRound, Camera } from 'lucide-react'
-import type { CheckInMethod } from '@/lib/types'
+import { ScanFace, UserRound, Camera } from 'lucide-react'
 
 // ---------- Page header ----------
 
@@ -136,30 +135,7 @@ export function LoadingBlock({ label = 'Loading…' }: { label?: string }) {
   )
 }
 
-// ---------- Method badge ----------
-
-const METHOD_META: Record<CheckInMethod, { icon: typeof ScanFace; label: string; cls: string }> = {
-  FACE: { icon: ScanFace, label: 'Face', cls: 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400' },
-  QR: { icon: QrCode, label: 'QR', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-400' },
-  PIN: { icon: Keyboard, label: 'PIN', cls: 'bg-stone-500/15 text-stone-600 dark:text-stone-300' },
-  MANUAL: { icon: UserRound, label: 'Manual', cls: 'bg-rose-500/10 text-rose-700 dark:text-rose-400' },
-}
-
-export function MethodBadge({ method }: { method: CheckInMethod }) {
-  const meta = METHOD_META[method] ?? METHOD_META.MANUAL
-  const Icon = meta.icon
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
-        meta.cls
-      )}
-    >
-      <Icon className="h-3 w-3" />
-      {meta.label}
-    </span>
-  )
-}
+// ---------- Camera badge ----------
 
 export function CameraBadge() {
   return (

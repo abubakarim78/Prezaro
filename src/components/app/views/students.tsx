@@ -2,13 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import QRCode from 'qrcode'
 import {
   ChevronRight,
   FileUp,
   Loader2,
   Plus,
-  QrCode,
   ScanFace,
   Search,
   UserRoundPlus,
@@ -74,7 +72,6 @@ export default function StudentsView() {
   // ---- dialogs ----
   const [newOpen, setNewOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
-  const [qrOpen, setQrOpen] = useState(false)
 
   const loadCourses = useCallback(async () => {
     try {
@@ -195,9 +192,6 @@ export default function StudentsView() {
               <DropdownMenuItem onClick={() => setCsvOpen(true)}>
                 <FileUp className="h-4 w-4" /> Import CSV
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setQrOpen(true)}>
-                <QrCode className="h-4 w-4" /> QR code sheets
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         }
@@ -273,7 +267,7 @@ export default function StudentsView() {
                 <EmptyState
                   icon={Users}
                   title="No students yet"
-                  description="Add students one by one, import a CSV list, or share QR sheets."
+                  description="Add students one by one or import a CSV list."
                   action={
                     <Button className="min-h-11" onClick={() => setNewOpen(true)}>
                       <UserRoundPlus className="h-4 w-4" /> Add student
@@ -328,7 +322,6 @@ export default function StudentsView() {
         onCreated={refresh}
       />
       <ImportCsvDialog open={csvOpen} onOpenChange={setCsvOpen} onImported={refresh} />
-      <QrSheetsDialog open={qrOpen} onOpenChange={setQrOpen} courses={courses} />
     </div>
   )
 }
@@ -662,206 +655,6 @@ function ImportCsvDialog({
           >
             {importing && <Loader2 className="h-4 w-4 animate-spin" />} Import{' '}
             {parsed.rows.length > 0 ? `${parsed.rows.length} students` : ''}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ---------- QR sheets dialog ----------
-
-const PRINT_CSS = `@media print {
-  body * { visibility: hidden !important; }
-  #cc-qr-sheets, #cc-qr-sheets * { visibility: visible !important; }
-  #cc-qr-sheets { position: absolute; inset: 0 auto auto 0; width: 100%; max-height: none !important; overflow: visible !important; padding: 8px; }
-  #cc-qr-sheets .cc-sheet { break-inside: avoid; page-break-inside: avoid; }
-}`
-
-interface Sheet {
-  id: string
-  name: string
-  studentId: string
-  pin: string
-  dataUrl: string
-}
-
-function QrSheetsDialog({
-  open,
-  onOpenChange,
-  courses,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  courses: Course[]
-}) {
-  const [courseId, setCourseId] = useState<string>('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [sheets, setSheets] = useState<Sheet[] | null>(null)
-  const [courseLabel, setCourseLabel] = useState('')
-  const [nonce, setNonce] = useState(0) // bumped on open / course switch / retry
-  const reqRef = useRef(0)
-
-  const effectiveId = courseId || courses[0]?.id || ''
-
-  // Refetch whenever the dialog opens, the course changes, or a retry is
-  // requested (nonce). Inline async so setState only fires after an await.
-  useEffect(() => {
-    if (!open || !effectiveId) return
-    let cancelled = false
-    const req = ++reqRef.current
-    ;(async () => {
-      try {
-        const d = await api<RosterResponse>(`/api/courses/${effectiveId}/roster`)
-        if (cancelled || req !== reqRef.current) return
-        const built = await Promise.all(
-          (d.roster ?? []).map(async (r) => ({
-            id: r.id,
-            name: `${r.firstName} ${r.lastName}`,
-            studentId: r.studentId,
-            pin: r.pin,
-            dataUrl: await QRCode.toDataURL(r.qrPayload, { margin: 1, width: 120 }),
-          }))
-        )
-        if (cancelled || req !== reqRef.current) return
-        setSheets(built)
-        setCourseLabel(d.course ? `${d.course.code} — ${d.course.title}` : '')
-        setLoading(false)
-      } catch (e) {
-        if (cancelled || req !== reqRef.current) return
-        setError(getErrorMessage(e))
-        setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [open, effectiveId, nonce])
-
-  const handleOpenChange = (v: boolean) => {
-    onOpenChange(v)
-    if (v) {
-      setSheets(null)
-      setError(null)
-      setCourseLabel('')
-      setLoading(Boolean(effectiveId))
-      setNonce((n) => n + 1)
-    }
-  }
-
-  const switchCourse = (id: string) => {
-    setCourseId(id)
-    setSheets(null)
-    setError(null)
-    setCourseLabel('')
-    setLoading(true)
-    setNonce((n) => n + 1)
-  }
-
-  const retry = () => {
-    setError(null)
-    setLoading(true)
-    setNonce((n) => n + 1)
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        {open && <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />}
-        <DialogHeader>
-          <DialogTitle>QR code sheets</DialogTitle>
-          <DialogDescription>
-            Print QR + PIN cards to stick on student ID cards for opt-out check-ins.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="qr-course">Course</Label>
-          <Select
-            value={effectiveId}
-            onValueChange={switchCourse}
-          >
-            <SelectTrigger id="qr-course" className="h-11 w-full">
-              <SelectValue placeholder={courses.length ? 'Choose a course' : 'No courses yet'} />
-            </SelectTrigger>
-            <SelectContent>
-              {courses.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.code} — {c.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div
-          id="cc-qr-sheets"
-          className="max-h-96 overflow-y-auto scrollbar-thin rounded-xl border bg-muted/30 p-3"
-        >
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-14 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Generating sheets…
-            </div>
-          ) : error ? (
-            <div className="py-8 text-center">
-              <p className="text-sm font-medium text-destructive">Couldn&apos;t load roster</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 min-h-9"
-                onClick={retry}
-              >
-                Try again
-              </Button>
-            </div>
-          ) : !sheets || sheets.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              {effectiveId
-                ? 'No students enrolled in this course.'
-                : courses.length
-                  ? 'Select a course to generate sheets.'
-                  : 'No courses yet — create one first.'}
-            </p>
-          ) : (
-            <>
-              {courseLabel && (
-                <p className="mb-2 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground print:hidden">
-                  {courseLabel} · {sheets.length} sheet{sheets.length === 1 ? '' : 's'}
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                {sheets.map((s) => (
-                  <div
-                    key={s.id}
-                    className="cc-sheet flex flex-col items-center gap-1 rounded-xl border bg-card p-2.5 text-center"
-                  >
-                    <img src={s.dataUrl} alt={`QR code for ${s.name}`} className="h-24 w-24" />
-                    <p className="w-full truncate text-[11px] font-semibold leading-tight">{s.name}</p>
-                    <p className="font-mono text-[10px] leading-tight text-muted-foreground">
-                      {s.studentId}
-                    </p>
-                    <Badge variant="outline" className="mt-0.5 font-mono text-[10px]">
-                      PIN {s.pin}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
-          <Button
-            className="min-h-11 flex-1 sm:flex-none"
-            onClick={() => window.print()}
-            disabled={!sheets || sheets.length === 0 || loading}
-          >
-            <QrCode className="h-4 w-4" /> Print sheets
           </Button>
         </DialogFooter>
       </DialogContent>

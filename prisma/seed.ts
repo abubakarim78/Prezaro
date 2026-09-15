@@ -115,7 +115,7 @@ async function main(): Promise<void> {
     courses.push(await db.course.create({ data: { ...spec, departmentId: cs.id } }))
   }
 
-  // ---- students (unique names, IDs, PINs) ----------------------
+  // ---- students (unique names, IDs) ---------------------------
   const usedNames = new Set<string>()
   const usedStudentIds = new Set<string>()
   const students: {
@@ -125,7 +125,6 @@ async function main(): Promise<void> {
     level: number
     email: string
     phone: string
-    pin: string
     departmentId: string
     descriptorsJson: string
   }[] = []
@@ -156,7 +155,6 @@ async function main(): Promise<void> {
       level: pick([200, 300, 400]),
       email: `${first}.${last}@st.ucc.edu.gh`.toLowerCase(),
       phone: `${phonePrefix}${String(Math.floor(rand() * 10000000)).padStart(7, '0')}`,
-      pin: String(Math.floor(rand() * 10000)).padStart(4, '0'),
       departmentId: cs.id,
       descriptorsJson: '[]',
     })
@@ -248,7 +246,6 @@ async function main(): Promise<void> {
     sessionId: string
     studentId: string
     status: string
-    method: string
     confidence: number | null
     markedAt: Date
   }[] = []
@@ -262,10 +259,7 @@ async function main(): Promise<void> {
         const p = attendanceProb.get(studentRowId) ?? 0.8
         if (rand() >= p) continue // absent (no record)
         const status = rand() < 0.08 ? 'LATE' : 'PRESENT'
-        const m = rand()
-        const method = m < 0.8 ? 'FACE' : m < 0.88 ? 'QR' : m < 0.93 ? 'PIN' : 'MANUAL'
-        const confidence =
-          method === 'FACE' ? Math.round((0.62 + rand() * 0.33) * 100) / 100 : null
+        const confidence = Math.round((0.62 + rand() * 0.33) * 100) / 100
         const markedAt = new Date(
           sess.startedAt.getTime() +
             Math.floor(rand() * 25) * 60 * 1000 + // 0–25 min after start
@@ -275,7 +269,6 @@ async function main(): Promise<void> {
           sessionId: sess.id,
           studentId: studentRowId,
           status,
-          method,
           confidence,
           markedAt,
         })

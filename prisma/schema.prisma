@@ -60,7 +60,6 @@ model Student {
   level           Int
   email           String?
   phone           String?
-  pin             String // 4-digit check-in PIN
   departmentId    String?
   department      Department?        @relation(fields: [departmentId], references: [id])
   descriptorsJson String             @default("[]") // JSON array of 128-d face descriptors
@@ -102,7 +101,6 @@ model AttendanceRecord {
   studentId  String
   student    Student  @relation(fields: [studentId], references: [id])
   status     String   @default("PRESENT") // PRESENT | LATE | ABSENT
-  method     String   @default("FACE") // FACE | QR | PIN | MANUAL
   confidence Float?
   markedAt   DateTime @default(now())
 

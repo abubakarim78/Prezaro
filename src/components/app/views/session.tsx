@@ -22,7 +22,6 @@ import {
 import type {
   AttendanceRecord,
   AttendanceStatus,
-  CheckInMethod,
   SessionDetail,
   SessionResponse,
   SessionMode,
@@ -47,7 +46,6 @@ import {
   EmptyState,
   IdentityAvatar,
   LoadingBlock,
-  MethodBadge,
   StatCard,
   StatusPill,
 } from '@/components/app/shared'
@@ -57,8 +55,6 @@ const MODE_META: Record<SessionMode, { icon: typeof ScanFace; label: string }> =
   KIOSK: { icon: MonitorSmartphone, label: 'Kiosk' },
   MANUAL: { icon: UserRound, label: 'Manual' },
 }
-
-const METHOD_ORDER: CheckInMethod[] = ['FACE', 'QR', 'PIN', 'MANUAL']
 
 const RECORD_FILTERS = [
   { key: 'ALL', label: 'All' },
@@ -96,12 +92,6 @@ export default function SessionView() {
   useEffect(() => {
     void load()
   }, [load, tick])
-
-  const methodCounts = useMemo(() => {
-    const counts: Record<CheckInMethod, number> = { FACE: 0, QR: 0, PIN: 0, MANUAL: 0 }
-    for (const r of session?.records ?? []) counts[r.method] = (counts[r.method] ?? 0) + 1
-    return counts
-  }, [session])
 
   const lateCount = useMemo(
     () => (session?.records ?? []).filter((r) => r.status === 'LATE').length,
@@ -285,19 +275,6 @@ export default function SessionView() {
           />
         </div>
 
-        {/* Method breakdown */}
-        <div className="flex flex-wrap items-center gap-2">
-          {METHOD_ORDER.map((m) => (
-            <span
-              key={m}
-              className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs"
-            >
-              <MethodBadge method={m} />
-              <span className="font-semibold tabular-nums">{methodCounts[m]}</span>
-            </span>
-          ))}
-        </div>
-
         {/* Records */}
         <div className="rounded-2xl border bg-card">
           <div className="space-y-3 p-4">
@@ -407,10 +384,7 @@ function RecordRow({ record }: { record: AttendanceRecord }) {
         <p className="font-mono text-[11px] text-muted-foreground">{record.code ?? record.studentId}</p>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
-        <div className="flex items-center gap-1.5">
-          <StatusPill status={record.status} />
-          <MethodBadge method={record.method} />
-        </div>
+        <StatusPill status={record.status} />
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {format(parseISO(record.markedAt), 'h:mm a')}
         </span>

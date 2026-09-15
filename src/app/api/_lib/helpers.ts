@@ -116,10 +116,6 @@ export function parseDescriptorJson(raw: string): number[][] {
   }
 }
 
-export function qrPayloadFor(student: { studentId: string; pin: string }): string {
-  return `CLASSCHECK|${student.studentId}|${student.pin}`
-}
-
 export const studentWithCoursesInclude = Prisma.validator<Prisma.StudentInclude>()({
   enrollments: { include: { course: { select: { code: true } } } },
 })
@@ -212,7 +208,6 @@ export function attendanceRecordDTO(r: RecordWithStudent): AttendanceRecordDTO {
     code: r.student.studentId,
     name: `${r.student.firstName} ${r.student.lastName}`,
     status: r.status as AttendanceRecordDTO['status'],
-    method: r.method as AttendanceRecordDTO['method'],
     confidence: r.confidence ?? null,
     markedAt: r.markedAt.toISOString(),
   }

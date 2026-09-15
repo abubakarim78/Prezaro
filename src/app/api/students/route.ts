@@ -123,10 +123,6 @@ function parseBulkCsv(raw: string): { rows: ParsedRow[]; invalid: number } {
   return { rows, invalid }
 }
 
-function randomPin(): string {
-  return String(Math.floor(Math.random() * 10000)).padStart(4, '0')
-}
-
 export async function POST(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
@@ -180,7 +176,6 @@ export async function POST(req: Request) {
           level: r.level,
           email: r.email,
           phone: r.phone,
-          pin: randomPin(),
           departmentId: user.departmentId,
           descriptorsJson: '[]',
         })),

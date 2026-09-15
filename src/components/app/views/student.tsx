@@ -2,16 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import QRCode from 'qrcode'
 import {
   ArrowLeft,
   BadgeCheck,
-  ChevronDown,
-  Copy,
-  KeyRound,
   Loader2,
   Pencil,
-  QrCode,
   ScanFace,
   SearchX,
   UserRound,
@@ -57,7 +52,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   AttendanceBar,
   AttendanceRing,
@@ -82,11 +76,6 @@ export default function StudentView() {
   const [myCourses, setMyCourses] = useState<Course[]>([])
   const [addCourse, setAddCourse] = useState('')
   const [courseBusy, setCourseBusy] = useState(false)
-
-  const [qrOpen, setQrOpen] = useState(false)
-  const [qr, setQr] = useState<{ dataUrl: string; pin: string } | null>(null)
-  const [qrLoading, setQrLoading] = useState(false)
-  const [qrError, setQrError] = useState<string | null>(null)
 
   const [editOpen, setEditOpen] = useState(false)
 
@@ -116,21 +105,6 @@ export default function StudentView() {
       .then((c) => setMyCourses(c.courses ?? []))
       .catch(() => setMyCourses([]))
   }, [])
-
-  const loadQr = useCallback(async () => {
-    if (!studentIdParam) return
-    setQrLoading(true)
-    setQrError(null)
-    try {
-      const d = await api<{ qrPayload: string; pin: string }>(`/api/students/${studentIdParam}/qr`)
-      const dataUrl = await QRCode.toDataURL(d.qrPayload, { margin: 1, width: 180 })
-      setQr({ dataUrl, pin: d.pin })
-    } catch (e) {
-      setQrError(getErrorMessage(e))
-    } finally {
-      setQrLoading(false)
-    }
-  }, [studentIdParam])
 
   const unenroll = async (courseId: string, code: string) => {
     if (!student) return
@@ -169,16 +143,6 @@ export default function StudentView() {
       load()
     } catch (e) {
       toast.error(getErrorMessage(e))
-    }
-  }
-
-  const copyPin = async () => {
-    if (!qr) return
-    try {
-      await navigator.clipboard.writeText(qr.pin)
-      toast.success('PIN copied')
-    } catch {
-      toast.error('Could not copy — long-press the PIN instead')
     }
   }
 
@@ -386,66 +350,6 @@ export default function StudentView() {
               </AlertDialog>
             )}
           </div>
-        </section>
-
-        {/* ---------- QR & PIN ---------- */}
-        <section className="rounded-2xl border bg-card p-4">
-          <Collapsible open={qrOpen} onOpenChange={setQrOpen}>
-            <CollapsibleTrigger className="flex min-h-11 w-full items-center gap-2.5 text-left">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <QrCode className="h-4 w-4" />
-              </span>
-              <span className="flex-1 text-sm font-semibold">QR &amp; PIN</span>
-              <ChevronDown
-                className={cn(
-                  'h-4 w-4 text-muted-foreground transition-transform',
-                  qrOpen && 'rotate-180'
-                )}
-              />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                Student shows this QR or enters ID + PIN when they opt out of face scanning.
-              </p>
-              <div className="mt-3 rounded-xl border bg-muted/30 p-4">
-                {qrLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-                  </div>
-                ) : qrError ? (
-                  <div className="py-4 text-center">
-                    <p className="text-sm font-medium text-destructive">Couldn&apos;t load QR</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{qrError}</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2.5 min-h-9"
-                      onClick={loadQr}
-                    >
-                      Try again
-                    </Button>
-                  </div>
-                ) : qr ? (
-                  <div className="flex flex-col items-center gap-3">
-                    <img
-                      src={qr.dataUrl}
-                      alt={`QR code for ${toTitle(fullName)}`}
-                      className="h-44 w-44 rounded-xl bg-white p-2"
-                    />
-                    <div className="flex items-center gap-2">
-                      <KeyRound className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-mono text-2xl font-bold tracking-[0.3em] tabular-nums">
-                        {qr.pin}
-                      </span>
-                    </div>
-                    <Button variant="outline" className="min-h-11" onClick={copyPin}>
-                      <Copy className="h-4 w-4" /> Copy PIN
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
         </section>
 
         {/* ---------- Courses ---------- */}

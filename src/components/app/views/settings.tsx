@@ -75,7 +75,7 @@ const SCAN_STEPS = [
   },
   {
     title: 'Scan the room',
-    desc: 'Start a session and walk through with your phone, or let students check in at a kiosk with face, QR or PIN.',
+    desc: 'Start a session and walk through the hall — faces are matched on-device in seconds.',
   },
   {
     title: 'Review & export',
@@ -86,7 +86,7 @@ const SCAN_STEPS = [
 const PRIVACY_POINTS = [
   'We store a numeric face template — never a photo.',
   'Templates are used for one thing only: marking attendance.',
-  'Students can opt out of face check-in at any time and use a QR code or PIN instead — no penalty, no questions asked.',
+  'Students who prefer not to enrol can still be marked present manually during review.',
   'Lecturers can delete any student’s face template from their profile in one tap.',
   'Face templates never leave your department’s devices and servers.',
 ]

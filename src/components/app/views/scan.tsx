@@ -3,22 +3,19 @@
 // ============================================================
 // ClassCheck — Scan view (the hero screen)
 // select → loading → live. Full-screen, no app shell.
-// Face (walkthrough / kiosk + liveness), QR and PIN check-ins.
+// Face check-ins — walkthrough or kiosk, with optional liveness.
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
-import jsQR from 'jsqr'
 import {
   ArrowLeft,
   ArrowRight,
   CameraOff,
   Check,
-  Keyboard,
   LogOut,
-  QrCode,
   RefreshCw,
   ScanFace,
   SwitchCamera,
@@ -28,7 +25,6 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -36,14 +32,6 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import { OfflineError, api, getErrorMessage } from '@/lib/api'
@@ -60,7 +48,6 @@ import type { PendingRecord } from '@/lib/offline'
 import type {
   AppSettings,
   AttendanceRecord,
-  CheckInMethod,
   Course,
   RosterEntry,
   SessionDetail,
@@ -108,8 +95,6 @@ interface KioskUI {
   message?: string
   nonce?: number
 }
-
-type ScanTab = 'face' | 'qr' | 'pin'
 
 const nameOf = (r: RosterEntry) => `${r.firstName} ${r.lastName}`.trim()
 
@@ -221,7 +206,6 @@ export default function ScanView() {
               studentId: p.studentId,
               name: p.name,
               status: p.status,
-              method: p.method,
               confidence: p.confidence ?? null,
               markedAt: p.markedAt,
             })),
@@ -564,7 +548,6 @@ function LiveScreen({
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const [facing, setFacing] = useState<'user' | 'environment'>(
     session.mode === 'KIOSK' ? 'user' : 'environment'
@@ -572,8 +555,6 @@ function LiveScreen({
   const [cameraState, setCameraState] = useState<'starting' | 'ready' | 'error' | 'off'>('starting')
   const [cameraError, setCameraError] = useState('')
   const [retryKey, setRetryKey] = useState(0)
-  const [tab, setTab] = useState<ScanTab>('face')
-  const [pinOpen, setPinOpen] = useState(false)
   const [exitOpen, setExitOpen] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [engine, setEngine] = useState<FaceApi | null>(initialEngine)
@@ -584,15 +565,9 @@ function LiveScreen({
   const [glowId, setGlowId] = useState<string | null>(null)
   const [kiosk, setKiosk] = useState<KioskUI>({ phase: 'idle' })
 
-  // PIN drawer form
-  const [pinStudentId, setPinStudentId] = useState('')
-  const [pinValue, setPinValue] = useState('')
-  const [pinError, setPinError] = useState('')
-
   // ---- refs used inside the detection loop ----
   const checkedRef = useRef<Set<string>>(new Set(initialChecked))
   const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
-  const rosterByStudentRef = useRef<Map<string, RosterEntry>>(new Map())
   const matchersRef = useRef<{ id: string; descriptors: number[][] }[]>([])
   const hitsRef = useRef<Map<string, number>>(new Map())
   const challengeRef = useRef<{ entryId: string; target: 'left' | 'right'; deadline: number } | null>(null)
@@ -600,9 +575,7 @@ function LiveScreen({
   const mirrorRef = useRef(facing === 'user')
   const busyRef = useRef(false)
   const aliveRef = useRef(true)
-  const invalidQrAtRef = useRef(0)
   const streamRef = useRef<MediaStream | null>(null)
-  const cameraOffRef = useRef(false)
 
   // sync machinery
   const bufferRef = useRef<Map<string, AttendanceRecord>>(new Map())
@@ -616,7 +589,6 @@ function LiveScreen({
   // ---------- static maps ----------
   useEffect(() => {
     rosterByIdRef.current = new Map(roster.map((r) => [r.id, r]))
-    rosterByStudentRef.current = new Map(roster.map((r) => [r.studentId, r]))
     matchersRef.current = roster
       .filter((r) => r.descriptors.length > 0)
       .map((r) => ({ id: r.id, descriptors: r.descriptors }))
@@ -641,7 +613,6 @@ function LiveScreen({
 
   // ---------- camera ----------
   useEffect(() => {
-    if (cameraOffRef.current) return
     let cancelled = false
     let localStream: MediaStream | null = null
     const video = videoRef.current
@@ -690,7 +661,6 @@ function LiveScreen({
             studentId: r.studentId,
             name: r.name,
             status: r.status,
-            method: r.method,
             confidence: r.confidence ?? null,
             markedAt: r.markedAt,
           })),
@@ -720,7 +690,6 @@ function LiveScreen({
       studentId: rec.studentId,
       name: rec.name,
       status: rec.status,
-      method: rec.method,
       confidence: rec.confidence ?? null,
       markedAt: rec.markedAt,
     })
@@ -735,7 +704,7 @@ function LiveScreen({
   }, [])
 
   const checkIn = useCallback(
-    (entry: RosterEntry, method: CheckInMethod, distance?: number): boolean => {
+    (entry: RosterEntry, distance?: number): boolean => {
       if (checkedRef.current.has(entry.id)) {
         glow(entry.id)
         return false
@@ -746,7 +715,6 @@ function LiveScreen({
         studentId: entry.id, // DB id — matches sync API + review merge
         name: nameOf(entry),
         status: 'PRESENT',
-        method,
         confidence: distance != null ? confidenceOf(distance) : null,
         markedAt: new Date().toISOString(),
       }
@@ -799,7 +767,7 @@ function LiveScreen({
 
   const kioskCelebrate = useCallback(
     (entry: RosterEntry, distance?: number) => {
-      fnRef.current.checkIn(entry, 'FACE', distance)
+      fnRef.current.checkIn(entry, distance)
       challengeRef.current = null
       setKioskBoth({
         phase: 'success',
@@ -814,64 +782,12 @@ function LiveScreen({
     [setKioskBoth]
   )
 
-  // ---------- QR + PIN check-ins ----------
-  const invalidQr = useCallback(() => {
-    const now = Date.now()
-    if (now - invalidQrAtRef.current < 1500) return
-    invalidQrAtRef.current = now
-    toast.error('Unrecognised or invalid QR code')
-    navigator.vibrate?.(200)
-  }, [])
-
-  const handleQrPayload = useCallback(
-    (payload: string) => {
-      const parts = payload.trim().split('|')
-      if (parts.length !== 3 || parts[0] !== 'CLASSCHECK') {
-        invalidQr()
-        return
-      }
-      const entry = rosterByStudentRef.current.get(parts[1])
-      if (!entry || entry.pin !== parts[2]) {
-        invalidQr()
-        return
-      }
-      if (!fnRef.current.checkIn(entry, 'QR')) {
-        toast.info(`${nameOf(entry)} is already checked in`)
-      }
-    },
-    [invalidQr]
-  )
-
-  const submitPin = useCallback(() => {
-    const sid = pinStudentId.trim()
-    const pin = pinValue.trim()
-    if (!sid || pin.length < 4) {
-      setPinError('Enter the student ID and 4-digit PIN')
-      return
-    }
-    const entry = rosterByStudentRef.current.get(sid)
-    if (!entry || entry.pin !== pin) {
-      setPinError('Student ID or PIN is incorrect')
-      navigator.vibrate?.(200)
-      return
-    }
-    setPinError('')
-    setPinStudentId('')
-    setPinValue('')
-    const added = fnRef.current.checkIn(entry, 'PIN')
-    setPinOpen(false)
-    setTab('face')
-    if (added) toast.success(`Checked in ${nameOf(entry)}`)
-    else toast.info(`${nameOf(entry)} is already checked in`)
-  }, [pinStudentId, pinValue])
-
   // ---------- detection loop ----------
   useEffect(() => {
     aliveRef.current = true
     if (cameraState !== 'ready' || !engine) return
     let raf = 0
     let last = 0
-    let frame = 0
 
     const walkthroughStep = async () => {
       const video = videoRef.current
@@ -897,7 +813,7 @@ function LiveScreen({
         if (hits >= CONSECUTIVE_FRAMES) {
           hitsRef.current.delete(m.id)
           const entry = rosterByIdRef.current.get(m.id)
-          if (entry) fnRef.current.checkIn(entry, 'FACE', m.distance)
+          if (entry) fnRef.current.checkIn(entry, m.distance)
         }
       })
       for (const key of [...hitsRef.current.keys()]) {
@@ -1009,28 +925,6 @@ function LiveScreen({
       // 'success' | 'info' — just keep boxes drawn
     }
 
-    const qrStep = async (frameNo: number) => {
-      const video = videoRef.current
-      const canvas = canvasRef.current
-      if (!video || !canvas) return
-      drawOverlay(canvas, video, [], [], { mirror: mirrorRef.current })
-      if (frameNo % 2 !== 0) return
-      const qc = qrCanvasRef.current
-      if (!qc) return
-      const w = 320
-      const h = video.videoHeight
-        ? Math.max(120, Math.round((w * video.videoHeight) / video.videoWidth))
-        : 240
-      if (qc.width !== w) qc.width = w
-      if (qc.height !== h) qc.height = h
-      const qctx = qc.getContext('2d', { willReadFrequently: true })
-      if (!qctx) return
-      qctx.drawImage(video, 0, 0, w, h)
-      const img = qctx.getImageData(0, 0, w, h)
-      const code = jsQR(img.data, w, h)
-      if (code?.data) handleQrPayload(code.data)
-    }
-
     const tick = (t: number) => {
       raf = requestAnimationFrame(tick)
       if (t - last < DETECT_INTERVAL_MS) return
@@ -1038,10 +932,8 @@ function LiveScreen({
       if (busyRef.current) return
       const video = videoRef.current
       if (!video || video.readyState < 2) return
-      frame++
       busyRef.current = true
-      const step =
-        tab === 'qr' ? qrStep(frame) : session.mode === 'KIOSK' ? kioskStep() : walkthroughStep()
+      const step = session.mode === 'KIOSK' ? kioskStep() : walkthroughStep()
       void step
         .catch(() => {})
         .finally(() => {
@@ -1057,10 +949,8 @@ function LiveScreen({
   }, [
     cameraState,
     engine,
-    tab,
     session.mode,
     liveness,
-    handleQrPayload,
     kioskIdle,
     setKioskBoth,
     glow,
@@ -1153,39 +1043,6 @@ function LiveScreen({
         </Button>
       </header>
 
-      {/* mode tabs */}
-      <div className="flex items-center gap-2 bg-black/80 px-3 pb-2.5">
-        <ToggleGroup
-          type="single"
-          value={tab}
-          onValueChange={(v) => {
-            if (!v) return
-            setTab(v as ScanTab)
-            if (v === 'pin') setPinOpen(true)
-          }}
-          className="rounded-xl border border-white/15 bg-white/5 p-1"
-        >
-          <ToggleGroupItem
-            value="face"
-            className="h-9 gap-1.5 rounded-lg px-4 text-white data-[state=on]:bg-white data-[state=on]:text-black"
-          >
-            <ScanFace className="h-4 w-4" /> Face
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="qr"
-            className="h-9 gap-1.5 rounded-lg px-4 text-white data-[state=on]:bg-white data-[state=on]:text-black"
-          >
-            <QrCode className="h-4 w-4" /> QR
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="pin"
-            className="h-9 gap-1.5 rounded-lg px-4 text-white data-[state=on]:bg-white data-[state=on]:text-black"
-          >
-            <Keyboard className="h-4 w-4" /> PIN
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
-
       {/* video area */}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
         <video
@@ -1197,9 +1054,6 @@ function LiveScreen({
           autoPlay
         />
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
-        <canvas ref={qrCanvasRef} className="hidden" aria-hidden="true" />
-
-        {tab === 'qr' && cameraState === 'ready' && <QrGuide />}
 
         {cameraState === 'starting' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
@@ -1216,33 +1070,18 @@ function LiveScreen({
               </div>
               <p className="mt-3 font-semibold">Camera unavailable</p>
               <p className="mt-1 text-sm text-white/70">
-                {cameraState === 'off'
-                  ? 'Running without camera — PIN check-in still works.'
-                  : cameraError || 'Check the browser permission and try again.'}
+                {cameraError || 'Check the browser permission and try again.'}
               </p>
               <div className="mt-4 flex flex-col gap-2">
                 <Button
                   className="h-11"
                   onClick={() => {
-                    cameraOffRef.current = false
                     setCameraError('')
                     setCameraState('starting')
                     setRetryKey((k) => k + 1)
                   }}
                 >
                   <RefreshCw className="h-4 w-4" /> Retry camera
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-11 border-white/20 bg-transparent text-white hover:bg-white/10"
-                  onClick={() => {
-                    cameraOffRef.current = true
-                    setCameraState('off')
-                    setTab('pin')
-                    setPinOpen(true)
-                  }}
-                >
-                  Continue without camera
                 </Button>
               </div>
             </div>
@@ -1260,17 +1099,9 @@ function LiveScreen({
       {/* bottom panel */}
       {session.mode === 'KIOSK' ? (
         <footer className="bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
-          <div className="flex items-center justify-center gap-2 px-4">
-            <Button
-              variant="outline"
-              className="h-11 flex-1"
-              onClick={() => setTab('qr')}
-              disabled={cameraState !== 'ready'}
-            >
-              <QrCode className="h-4 w-4" /> QR code
-            </Button>
-            <Button variant="outline" className="h-11 flex-1" onClick={() => setPinOpen(true)}>
-              <Keyboard className="h-4 w-4" /> PIN
+          <div className="px-4">
+            <Button className="h-12 w-full text-base font-semibold" onClick={endAndReview}>
+              End &amp; review
             </Button>
           </div>
         </footer>
@@ -1353,61 +1184,6 @@ function LiveScreen({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* PIN drawer */}
-      <Drawer open={pinOpen} onOpenChange={(open) => { setPinOpen(open); if (!open && tab === 'pin') setTab('face') }}>
-        <DrawerContent className="rounded-t-2xl">
-          <DrawerHeader className="text-left">
-            <DrawerTitle>PIN check-in</DrawerTitle>
-            <DrawerDescription>
-              The student enters their ID and 4-digit PIN — works offline.
-            </DrawerDescription>
-          </DrawerHeader>
-          <div className="space-y-3 px-4">
-            <div>
-              <label htmlFor="pin-student-id" className="mb-1 block text-xs font-medium text-muted-foreground">
-                Student ID
-              </label>
-              <Input
-                id="pin-student-id"
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder="e.g. 20431167"
-                value={pinStudentId}
-                onChange={(e) => {
-                  setPinStudentId(e.target.value)
-                  setPinError('')
-                }}
-                className="h-12 text-base"
-              />
-            </div>
-            <div>
-              <label htmlFor="pin-value" className="mb-1 block text-xs font-medium text-muted-foreground">
-                4-digit PIN
-              </label>
-              <Input
-                id="pin-value"
-                type="password"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={4}
-                placeholder="••••"
-                value={pinValue}
-                onChange={(e) => {
-                  setPinValue(e.target.value.replace(/\D/g, '').slice(0, 4))
-                  setPinError('')
-                }}
-                className="h-12 text-center text-2xl font-bold tracking-[0.5em]"
-              />
-            </div>
-            {pinError && <p className="text-sm text-destructive">{pinError}</p>}
-          </div>
-          <DrawerFooter className="pb-safe" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }}>
-            <Button className="h-12 text-base font-semibold" onClick={submitPin}>
-              Check in
-            </Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
     </div>
   )
 }
@@ -1490,25 +1266,6 @@ function KioskOverlay({ ui }: { ui: KioskUI }) {
           Stand about an arm&apos;s length away — you&apos;ll be checked in automatically
         </p>
       )}
-    </div>
-  )
-}
-
-// ---------- QR reticle ----------
-
-function QrGuide() {
-  const corner = 'absolute h-10 w-10 border-white border-[3px]'
-  return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <div className="relative h-56 w-56 rounded-2xl">
-        <span className={`${corner} left-0 top-0 rounded-tl-2xl border-r-0 border-b-0`} />
-        <span className={`${corner} right-0 top-0 rounded-tr-2xl border-l-0 border-b-0`} />
-        <span className={`${corner} bottom-0 left-0 rounded-bl-2xl border-r-0 border-t-0`} />
-        <span className={`${corner} bottom-0 right-0 rounded-br-2xl border-l-0 border-t-0`} />
-        <p className="absolute -bottom-8 left-0 right-0 text-center text-sm font-medium text-white/85">
-          Hold the student&apos;s QR code inside the frame
-        </p>
-      </div>
     </div>
   )
 }
