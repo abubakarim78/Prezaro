@@ -453,8 +453,8 @@ export default function ScanView() {
 
             {selected && faceCount === 0 && (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
-                No students in {selected.code} have enrolled their face yet — QR and PIN
-                check-ins still work.
+                No students in {selected.code} have enrolled their face yet — you can
+                still mark students present manually during review.
               </div>
             )}
             {selected && (faceCount ?? 0) > 0 && (

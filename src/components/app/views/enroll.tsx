@@ -235,7 +235,8 @@ export default function EnrollView() {
               <li className="flex gap-2.5">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <span>
-                  Opting out is never penalised — students can always check in with QR or PIN.
+                  Opting out is never penalised — the lecturer can always mark a
+                  student present manually during review.
                 </span>
               </li>
             </ul>

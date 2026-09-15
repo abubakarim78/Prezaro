@@ -134,3 +134,19 @@ Work Log:
 
 Stage Summary:
 - ClassCheck is now a single-method face attendance app: enroll faces → scan (walkthrough/kiosk + liveness) → review/override → finalize → CSV export. No biometric-adjacent fallback surface, no PIN/QR credentials to manage.
+
+---
+Task ID: 11
+Agent: Z.ai (orchestrator)
+Task: Fix stale QR/PIN consent copy left from Task 10 + record fingerprint feasibility decision for the user.
+
+Work Log:
+- Found 2 stale strings still referencing the removed QR/PIN fallback: enroll.tsx consent screen ("students can always check in with QR or PIN") and scan.tsx empty-roster warning ("QR and PIN check-ins still work").
+- Replaced both with the true post-removal fallback: manual presence marking during session review (enroll.tsx: "the lecturer can always mark a student present manually during review"; scan.tsx: "you can still mark students present manually during review").
+- Verified app state after sandbox restart: dev server healthy (200), all API calls 200, no 401/500 in dev.log; Task 10 removal confirmed complete (no pin/qr code references remain — only the 2 copy strings, now fixed).
+- eslint clean; tsc clean for app code (only pre-existing examples/skills errors remain).
+- Fingerprint feasibility researched & answered to user (NO code built — deliberate decision): phone OSes never expose fingerprint sensor images to browsers; sensor is hardware-locked to OS-level auth of the device owner only. On the lecturer's phone, fingerprint capture of students is impossible (PWA or native). The only standards-based path is WebAuthn/passkeys: each student registers their own phone (fingerprint unlocks a device-stored key) and self-checks-in; biometric never leaves the student's device. Blocked from building now: requires student accounts (none exist — only lecturer/admin auth), HTTPS secure context (preview iframe can't host WebAuthn), per-student devices, and cannot be browser-verified in this sandbox. Recommended: keep face + manual review override as the opt-out path for v1; WebAuthn fingerprint self-check-in is a Phase-2 feature after HTTPS deployment.
+
+Stage Summary:
+- All QR/PIN references (code + copy) are now fully eradicated; app is cleanly single-method (face) with manual review override as the only fallback.
+- Decision recorded: fingerprint (WebAuthn/passkey self-check-in) deferred to Phase 2 post-deployment; requires student accounts + HTTPS + student-owned devices.
