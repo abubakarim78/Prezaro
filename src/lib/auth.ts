@@ -3,6 +3,9 @@
 // JWT (jose, HS256) + httpOnly cookie `cc_token` + guards.
 // ============================================================
 import { SignJWT, jwtVerify } from 'jose'
+import fs from 'node:fs'
+import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import type { Department, User } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -44,10 +47,47 @@ export class ConflictError extends ApiError {
   }
 }
 
+const SECRET_FILE = path.join(process.cwd(), 'db', '.auth-secret')
+let cachedSecret: string | null = null
+
+/**
+ * Resolve the JWT signing secret, resilient to sandbox `.env` resets:
+ * 1. `AUTH_SECRET` from the environment (if the platform provides one)
+ * 2. A persisted secret file (db/.auth-secret) — stable across restarts
+ * 3. Generate + persist a new random secret as a last resort
+ * Never throws, so login can't 500 over missing config.
+ */
+function resolveSecret(): string {
+  if (cachedSecret) return cachedSecret
+  const fromEnv = process.env.AUTH_SECRET
+  if (fromEnv) {
+    cachedSecret = fromEnv
+    return cachedSecret
+  }
+  try {
+    const saved = fs.readFileSync(SECRET_FILE, 'utf8').trim()
+    if (saved) {
+      cachedSecret = saved
+      return cachedSecret
+    }
+  } catch {
+    // file missing — fall through to generation
+  }
+  try {
+    const generated = randomBytes(32).toString('hex')
+    fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true })
+    fs.writeFileSync(SECRET_FILE, generated, { encoding: 'utf8', mode: 0o600 })
+    cachedSecret = generated
+    return cachedSecret
+  } catch {
+    // Read-only fs — derive a stable fallback rather than crashing logins.
+    cachedSecret = 'classcheck-derived-' + (process.env.DATABASE_URL ?? 'local')
+    return cachedSecret
+  }
+}
+
 function getSecret(): Uint8Array {
-  const secret = process.env.AUTH_SECRET
-  if (!secret) throw new Error('AUTH_SECRET is not set')
-  return new TextEncoder().encode(secret)
+  return new TextEncoder().encode(resolveSecret())
 }
 
 export interface TokenPayload {

@@ -24,6 +24,7 @@ import type {
   StudentsResponse,
   Course,
 } from '@/lib/types'
+import { STUDENT_ID_PATTERN } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -392,8 +393,8 @@ function NewStudentDialog({
 
   const submit = async () => {
     const sid = studentId.trim()
-    if (!/^[A-Za-z0-9]{6,12}$/.test(sid)) {
-      setFieldError('Student ID must be 6–12 letters/numbers')
+    if (!STUDENT_ID_PATTERN.test(sid)) {
+      setFieldError('Invalid ID — use letters, numbers, / or - (e.g. PHA/0001/26)')
       return
     }
     if (!firstName.trim() || !lastName.trim()) {
@@ -443,7 +444,8 @@ function NewStudentDialog({
               id="ns-id"
               value={studentId}
               onChange={(e) => setStudentId(e.target.value.toUpperCase())}
-              placeholder="e.g. 20451926"
+              placeholder="e.g. PHA/0001/26"
+              maxLength={20}
               className="h-11 font-mono"
               autoFocus
             />
@@ -509,7 +511,11 @@ function NewStudentDialog({
               className="h-11"
             />
           </div>
-          {fieldError && <p className="text-sm font-medium text-destructive">{fieldError}</p>}
+          {fieldError && (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              {fieldError}
+            </p>
+          )}
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => onOpenChange(false)} disabled={saving}>
@@ -549,7 +555,13 @@ function parseCsv(text: string): { rows: CsvRow[]; invalid: number; dupes: numbe
       continue
     }
     const [studentId, firstName, lastName, level, email, phone] = parts
-    if (!studentId || !firstName || !lastName || !/^\d+$/.test(level)) {
+    if (
+      !studentId ||
+      !firstName ||
+      !lastName ||
+      !/^\d+$/.test(level) ||
+      !STUDENT_ID_PATTERN.test(studentId)
+    ) {
       invalid++
       continue
     }
@@ -617,7 +629,7 @@ function ImportCsvDialog({
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={'20451926,Ama,Mensah,300\n20451927,Kofi,Boateng,300,ama@stu.edu'}
+          placeholder={'PHA/0001/26,Ama,Mensah,300\nPHA/0002/26,Kofi,Boateng,300,ama@stu.edu'}
           className="min-h-40 font-mono text-xs"
           aria-label="CSV rows"
         />

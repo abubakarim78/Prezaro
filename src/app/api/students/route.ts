@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { BadRequestError, requireUser } from '@/lib/auth'
+import { STUDENT_ID_PATTERN } from '@/lib/types'
 import {
   handle,
   readJson,
@@ -55,7 +56,10 @@ const nullableTrimmedPhone = z.preprocess(
 )
 
 const singleSchema = z.object({
-  studentId: z.string().trim().min(1, 'Student ID is required'),
+  studentId: z
+    .string()
+    .trim()
+    .regex(STUDENT_ID_PATTERN, 'Student ID format is invalid — use letters, numbers, / or - (e.g. PHA/0001/26)'),
   firstName: z.string().trim().min(1, 'First name is required'),
   lastName: z.string().trim().min(1, 'Last name is required'),
   level: z.coerce.number().int().min(100, 'Level must be 100–900').max(900, 'Level must be 100–900'),
@@ -95,7 +99,15 @@ function parseBulkCsv(raw: string): { rows: ParsedRow[]; invalid: number } {
     }
     const [studentId, firstName, lastName, levelRaw, email, phone] = cells
     const level = Number.parseInt(levelRaw, 10)
-    if (!studentId || !firstName || !lastName || !Number.isFinite(level) || level < 100 || level > 900) {
+    if (
+      !studentId ||
+      !STUDENT_ID_PATTERN.test(studentId) ||
+      !firstName ||
+      !lastName ||
+      !Number.isFinite(level) ||
+      level < 100 ||
+      level > 900
+    ) {
       invalid++
       continue
     }

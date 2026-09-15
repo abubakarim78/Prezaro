@@ -143,6 +143,14 @@ export interface AppSettings {
 
 // ---- API response envelopes ---------------------------------
 
+/**
+ * Student index-number format. Accepts department formats like
+ * `PHA/0001/26`, `CS-101/23`, and plain numeric IDs like `20451926`:
+ * 3–20 chars of letters/digits with `/` or `-` separators allowed
+ * in the middle (no leading/trailing separator).
+ */
+export const STUDENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9/-]{1,18}[A-Za-z0-9]$/
+
 export interface LoginResponse {
   user: User
   token?: string

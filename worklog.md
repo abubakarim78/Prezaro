@@ -100,3 +100,19 @@ Work Log:
 
 Stage Summary:
 - Auth now works in all contexts: preview iframe (bearer), top-level & installed PWA (bearer seeded from first cookie login). User's stuck state self-heals on reload: /me returns null → clean login screen → sign in once → token stored.
+
+---
+Task ID: 9
+Agent: Z.ai (orchestrator)
+Task: Allow department student-ID format (PHA/0001/26) + fix login 500 caused by sandbox .env reset wiping AUTH_SECRET.
+
+Work Log:
+- Replaced strict /^[A-Za-z0-9]{6,12}$/ student-ID validation with shared STUDENT_ID_PATTERN in src/lib/types.ts: ^[A-Za-z0-9][A-Za-z0-9/-]{1,18}[A-Za-z0-9]$ (3–20 chars, letters/digits with / or - separators, e.g. PHA/0001/26, CS-101/23, plain numeric IDs still valid).
+- Applied pattern in 4 places: New Student dialog (students.tsx submit + placeholder "e.g. PHA/0001/26" + maxLength 20 + role="alert" error), client CSV preview parseCsv, backend single-create zod regex, backend bulk CSV row validation. CSV dialog example now shows PHA format.
+- CRITICAL FIX discovered during testing: sandbox restarted dev server at 21:52 and regenerated .env WITHOUT AUTH_SECRET → signToken/getSecret threw → every login 500'd. Made secret resolution resilient in auth.ts: env AUTH_SECRET → persisted db/.auth-secret file → auto-generate+persist → derived last-resort; never throws. Seeded db/.auth-secret with the original secret so previously issued tokens remain valid.
+- Verified via curl: login OK again; create PHA/0001/26 → 200; invalid "bad id!" → 400 with clear message; bulk CSV 2 PHA rows created; search "PHA/0001" matches. Browser E2E: New Student dialog accepts PHA/0007/26 (auto-uppercased), student appears in list; invalid format shows inline error and blocks submit; students list re-renders clean.
+- Cleaned up all 4 test students (no DELETE endpoint — removed via sqlite3: AttendanceRecord → Enrollment → Student; back to 42 students). Lint + tsc clean; dev.log free of 401/500.
+
+Stage Summary:
+- Student IDs now accept the department's real format PHA/0001/26 everywhere (dialog, CSV import, API, QR payloads use | delimiter so / is safe).
+- Auth secret no longer depends on .env surviving sandbox restarts; tokens issued before the reset still validate.
