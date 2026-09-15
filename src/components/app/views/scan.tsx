@@ -18,7 +18,9 @@ import {
   LogOut,
   RefreshCw,
   ScanFace,
+  Search,
   SwitchCamera,
+  UserPlus,
   Users,
   WifiOff,
   X,
@@ -33,6 +35,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { Input } from '@/components/ui/input'
+import { IdentityAvatar } from '@/components/app/shared'
 
 import { OfflineError, api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
@@ -565,6 +576,10 @@ function LiveScreen({
   const [glowId, setGlowId] = useState<string | null>(null)
   const [kiosk, setKiosk] = useState<KioskUI>({ phase: 'idle' })
 
+  // manual check-in
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualQuery, setManualQuery] = useState('')
+
   // ---- refs used inside the detection loop ----
   const checkedRef = useRef<Set<string>>(new Set(initialChecked))
   const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
@@ -740,6 +755,17 @@ function LiveScreen({
       return true
     },
     [session.id, scheduleSync, glow]
+  )
+
+  const manualCheckIn = useCallback(
+    (entry: RosterEntry) => {
+      if (checkIn(entry)) {
+        toast.success(`${nameOf(entry)} marked present`)
+      } else {
+        toast.info(`${nameOf(entry)} was already checked in`)
+      }
+    },
+    [checkIn]
   )
 
   const fnRef = useRef({ checkIn, flushSync })
@@ -998,6 +1024,16 @@ function LiveScreen({
 
   const cameraUnavailable = cameraState === 'error' || cameraState === 'off'
 
+  // ---------- manual add list ----------
+  const mq = manualQuery.trim().toLowerCase()
+  const manualCandidates = roster.filter(
+    (r) =>
+      !checkedIds.has(r.id) &&
+      (mq === '' ||
+        nameOf(r).toLowerCase().includes(mq) ||
+        r.studentId.toLowerCase().includes(mq))
+  )
+
   // ---------- render ----------
   return (
     <div className="fixed inset-0 flex h-dvh flex-col bg-black text-white">
@@ -1099,8 +1135,15 @@ function LiveScreen({
       {/* bottom panel */}
       {session.mode === 'KIOSK' ? (
         <footer className="bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
-          <div className="px-4">
-            <Button className="h-12 w-full text-base font-semibold" onClick={endAndReview}>
+          <div className="flex gap-2 px-4">
+            <Button
+              variant="outline"
+              className="h-12 shrink-0 gap-2"
+              onClick={() => setManualOpen(true)}
+            >
+              <UserPlus className="h-4 w-4" /> Add manually
+            </Button>
+            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
               End &amp; review
             </Button>
           </div>
@@ -1143,8 +1186,15 @@ function LiveScreen({
               ))}
             </AnimatePresence>
           </div>
-          <div className="px-4">
-            <Button className="h-12 w-full text-base font-semibold" onClick={endAndReview}>
+          <div className="flex gap-2 px-4">
+            <Button
+              variant="outline"
+              className="h-12 shrink-0 gap-2"
+              onClick={() => setManualOpen(true)}
+            >
+              <UserPlus className="h-4 w-4" /> Add manually
+            </Button>
+            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
               End &amp; review
             </Button>
           </div>
@@ -1183,6 +1233,71 @@ function LiveScreen({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* manual check-in sheet */}
+      <Sheet open={manualOpen} onOpenChange={setManualOpen}>
+        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 rounded-t-3xl p-0">
+          <SheetHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
+            <SheetTitle>Add student manually</SheetTitle>
+            <SheetDescription>
+              For students who opted out of face scans or whose face didn&apos;t match.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="shrink-0 px-4 pt-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={manualQuery}
+                onChange={(e) => setManualQuery(e.target.value)}
+                placeholder="Search name or student ID…"
+                className="h-11 rounded-xl bg-card pl-9"
+                inputMode="search"
+              />
+            </div>
+            <p className="mt-2 px-1 text-[11px] text-muted-foreground" aria-live="polite">
+              {roster.length - checkedIds.size} of {roster.length} still to check in · tap a name
+              to mark present
+            </p>
+          </div>
+          <div className="mt-2 min-h-0 flex-1 overflow-y-auto scrollbar-thin px-4 pb-2">
+            {manualCandidates.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                {checkedIds.size === roster.length
+                  ? 'Everyone is checked in.'
+                  : `No students match “${manualQuery}”.`}
+              </div>
+            ) : (
+              <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+                {manualCandidates.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => manualCheckIn(r)}
+                    className="flex min-h-11 w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/60 active:bg-accent"
+                  >
+                    <IdentityAvatar name={nameOf(r)} className="h-9 w-9" />
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-sm font-medium">{nameOf(r)}</span>
+                      <span className="block font-mono text-[11px] text-muted-foreground">
+                        {r.studentId}
+                      </span>
+                    </span>
+                    <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div
+            className="shrink-0 border-t bg-background px-4"
+            style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
+          >
+            <Button variant="outline" className="h-11 w-full" onClick={() => setManualOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
     </div>
   )

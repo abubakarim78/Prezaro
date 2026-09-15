@@ -1,0 +1,1272 @@
+     1→'use client'
+     2→
+     3→// ============================================================
+     4→// ClassCheck — Scan view (the hero screen)
+     5→// select → loading → live. Full-screen, no app shell.
+     6→// Face check-ins — walkthrough or kiosk, with optional liveness.
+     7→// ============================================================
+     8→
+     9→import { useCallback, useEffect, useRef, useState } from 'react'
+    10→import { AnimatePresence, motion } from 'framer-motion'
+    11→import { format } from 'date-fns'
+    12→import { toast } from 'sonner'
+    13→import {
+    14→  ArrowLeft,
+    15→  ArrowRight,
+    16→  CameraOff,
+    17→  Check,
+    18→  LogOut,
+    19→  RefreshCw,
+    20→  ScanFace,
+    21→  SwitchCamera,
+    22→  Users,
+    23→  WifiOff,
+    24→  X,
+    25→} from 'lucide-react'
+    26→
+    27→import { Button } from '@/components/ui/button'
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogContent,
+    31→  AlertDialogDescription,
+    32→  AlertDialogFooter,
+    33→  AlertDialogTitle,
+    34→} from '@/components/ui/alert-dialog'
+    35→import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+    36→
+    37→import { OfflineError, api, getErrorMessage } from '@/lib/api'
+    38→import { useAppStore } from '@/lib/store'
+    39→import {
+    40→  cacheRoster,
+    41→  getCachedRoster,
+    42→  pendingCount,
+    43→  pendingForSession,
+    44→  queueRecord,
+    45→  removeQueued,
+    46→} from '@/lib/offline'
+    47→import type { PendingRecord } from '@/lib/offline'
+    48→import type {
+    49→  AppSettings,
+    50→  AttendanceRecord,
+    51→  Course,
+    52→  RosterEntry,
+    53→  SessionDetail,
+    54→  SessionMode,
+    55→  SessionSummary,
+    56→} from '@/lib/types'
+    57→import { bestMatch } from '@/lib/face/match'
+    58→import {
+    59→  detectAll,
+    60→  detectSingle,
+    61→  drawOverlay,
+    62→  loadFaceEngine,
+    63→  noseOffset,
+    64→  startCamera,
+    65→  stopCamera,
+    66→  type FaceApi,
+    67→  type FaceMatchInfo,
+    68→} from '@/lib/face/engine'
+    69→
+    70→// ---------- Tunables ----------------------------------------
+    71→
+    72→const DETECT_INTERVAL_MS = 166 // ~6 fps
+    73→const WALKTHROUGH_THRESHOLD = 0.5
+    74→const KIOSK_THRESHOLD = 0.45
+    75→const CONSECUTIVE_FRAMES = 2
+    76→const CHALLENGE_MS = 5000
+    77→const TURN_OFFSET = 0.05
+    78→const SYNC_DEBOUNCE_MS = 15000
+    79→const RECENT_MAX = 24
+    80→
+    81→// ---------- Local shapes ------------------------------------
+    82→
+    83→interface RecentChip {
+    84→  key: string
+    85→  entryId: string
+    86→  name: string
+    87→  time: string
+    88→}
+    89→
+    90→interface KioskUI {
+    91→  phase: 'idle' | 'challenge' | 'success' | 'info'
+    92→  target?: 'left' | 'right'
+    93→  name?: string
+    94→  studentId?: string
+    95→  message?: string
+    96→  nonce?: number
+    97→}
+    98→
+    99→const nameOf = (r: RosterEntry) => `${r.firstName} ${r.lastName}`.trim()
+   100→
+   101→const confidenceOf = (distance: number) =>
+   102→  Math.max(0, Math.min(0.999, 1 - distance))
+   103→
+   104→// ============================================================
+   105→// ScanView
+   106→// ============================================================
+   107→
+   108→export default function ScanView() {
+   109→  const navigate = useAppStore((s) => s.navigate)
+   110→  const online = useAppStore((s) => s.online)
+   111→
+   112→  const [phase, setPhase] = useState<'select' | 'loading' | 'live'>('select')
+   113→  const [courses, setCourses] = useState<Course[] | null>(null)
+   114→  const [coursesError, setCoursesError] = useState<string | null>(null)
+   115→  const [settings, setSettings] = useState<AppSettings | null>(null)
+   116→  const [mode, setMode] = useState<SessionMode>('WALKTHROUGH')
+   117→  const [selectedId, setSelectedId] = useState<string | null>(null)
+   118→  const [faceCount, setFaceCount] = useState<number | null>(null)
+   119→  const [loadStage, setLoadStage] = useState('Preparing…')
+   120→  const [bootError, setBootError] = useState<{ title: string; message: string } | null>(null)
+   121→  const [live, setLive] = useState<{
+   122→    session: Pick<SessionSummary, 'id' | 'courseId' | 'courseCode'> & { mode: SessionMode }
+   123→    roster: RosterEntry[]
+   124→    checkedEntryIds: string[]
+   125→    recent: RecentChip[]
+   126→  } | null>(null)
+   127→
+   128→  const rosterToken = useRef(0)
+   129→  const bootToken = useRef(0)
+   130→  const engineRef = useRef<FaceApi | null>(null)
+   131→
+   132→  // ---- courses + settings ----
+   133→  useEffect(() => {
+   134→    let alive = true
+   135→    api<{ courses: Course[] }>('/api/courses')
+   136→      .then((d) => {
+   137→        if (alive) setCourses(d.courses)
+   138→      })
+   139→      .catch((e) => {
+   140→        if (alive) setCoursesError(getErrorMessage(e))
+   141→      })
+   142→    api<{ settings: AppSettings }>('/api/settings')
+   143→      .then((d) => {
+   144→        if (alive) {
+   145→          setSettings(d.settings)
+   146→          setMode(d.settings.defaultMode)
+   147→        }
+   148→      })
+   149→      .catch(() => {})
+   150→    return () => {
+   151→      alive = false
+   152→    }
+   153→  }, [])
+   154→
+   155→  // ---- roster count on course select ----
+   156→  const selectCourse = useCallback(
+   157→    async (courseId: string) => {
+   158→      setSelectedId(courseId)
+   159→      setFaceCount(null)
+   160→      const course = courses?.find((c) => c.id === courseId)
+   161→      const token = ++rosterToken.current
+   162→      try {
+   163→        const d = await api<{ roster: RosterEntry[] }>(`/api/courses/${courseId}/roster`)
+   164→        if (rosterToken.current !== token) return
+   165→        setFaceCount(d.roster.filter((r) => r.descriptors.length > 0).length)
+   166→        cacheRoster({
+   167→          savedAt: new Date().toISOString(),
+   168→          course: {
+   169→            id: courseId,
+   170→            code: course?.code ?? '',
+   171→            title: course?.title ?? '',
+   172→          },
+   173→          roster: d.roster,
+   174→        })
+   175→      } catch (e) {
+   176→      if (rosterToken.current !== token) return
+   177→        const cached = getCachedRoster(courseId)
+   178→        if (cached) setFaceCount(cached.roster.filter((r) => r.descriptors.length > 0).length)
+   179→        else if (e instanceof OfflineError) setFaceCount(-1)
+   180→      }
+   181→    },
+   182→    [courses]
+   183→  )
+   184→
+   185→  // ---- session ensure (GET open → POST) ----
+   186→  const ensureSession = useCallback(
+   187→    async (course: Course, sessionMode: SessionMode): Promise<SessionDetail> => {
+   188→      const store = useAppStore.getState()
+   189→      if (!store.online) {
+   190→        const open = store.openSession
+   191→        if (open && open.courseId === course.id) {
+   192→          // resume the open session offline
+   193→          const pending = pendingForSession(open.id)
+   194→          return {
+   195→            id: open.id,
+   196→            courseId: course.id,
+   197→            courseCode: course.code,
+   198→            courseTitle: course.title,
+   199→            mode: open.mode,
+   200→            status: 'OPEN',
+   201→            startedAt: new Date().toISOString(),
+   202→            presentCount: pending.length,
+   203→            rosterSize: course.studentCount,
+   204→            lecturerName: store.user?.name ?? '',
+   205→            records: pending.map<AttendanceRecord>((p) => ({
+   206→              studentId: p.studentId,
+   207→              name: p.name,
+   208→              status: p.status,
+   209→              confidence: p.confidence ?? null,
+   210→              markedAt: p.markedAt,
+   211→            })),
+   212→          }
+   213→        }
+   214→        throw new Error('Starting a new scan needs a connection — reconnect and try again.')
+   215→      }
+   216→
+   217→      const { sessions } = await api<{ sessions: SessionSummary[] }>(
+   218→        `/api/sessions?courseId=${encodeURIComponent(course.id)}&status=OPEN`
+   219→      )
+   220→      let summary = sessions[0] ?? null
+   221→      if (!summary) {
+   222→        const created = await api<{ session: SessionSummary }>('/api/sessions', {
+   223→          method: 'POST',
+   224→          body: { courseId: course.id, mode: sessionMode },
+   225→        })
+   226→        summary = created.session
+   227→      }
+   228→      // Pull detail for seeding existing check-ins (best effort)
+   229→      try {
+   230→        const detail = await api<{ session: SessionDetail }>(`/api/sessions/${summary.id}`)
+   231→        return detail.session
+   232→      } catch {
+   233→        return {
+   234→          ...summary,
+   235→          lecturerName: store.user?.name ?? '',
+   236→          records: [],
+   237→        }
+   238→      }
+   239→    },
+   240→    []
+   241→  )
+   242→
+   243→  // ---- start scanning ----
+   244→  const startScan = useCallback(async () => {
+   245→    const course = courses?.find((c) => c.id === selectedId)
+   246→    if (!course) return
+   247→    const token = ++bootToken.current
+   248→    setPhase('loading')
+   249→    setBootError(null)
+   250→    setLoadStage('Fetching roster…')
+   251→
+   252→    try {
+   253→      // 1. roster
+   254→      let roster: RosterEntry[] | null = null
+   255→      try {
+   256→        const d = await api<{ course: { id: string; code: string; title: string }; roster: RosterEntry[] }>(
+   257→          `/api/courses/${course.id}/roster`
+   258→        )
+   259→        roster = d.roster
+   260→        cacheRoster({
+   261→          savedAt: new Date().toISOString(),
+   262→          course: d.course,
+   263→          roster: d.roster,
+   264→        })
+   265→      } catch (e) {
+   266→        const cached = getCachedRoster(course.id)
+   267→        if (cached) roster = cached.roster
+   268→        else if (!(e instanceof OfflineError)) throw e
+   269→      }
+   270→      if (bootToken.current !== token) return
+   271→      if (!roster) {
+   272→        throw new Error(
+   273→          'You are offline and this course has no cached roster. Reconnect and try again.'
+   274→        )
+   275→      }
+   276→
+   277→      // 2. face engine
+   278→      setLoadStage('Loading face engine…')
+   279→      const faceapi = await loadFaceEngine((s) => {
+   280→        if (bootToken.current === token) setLoadStage(s)
+   281→      })
+   282→      if (bootToken.current !== token) return
+   283→      engineRef.current = faceapi
+   284→
+   285→      // 3. session (create / resume)
+   286→      setLoadStage('Preparing session…')
+   287→      const session = await ensureSession(course, mode)
+   288→      if (bootToken.current !== token) return
+   289→
+   290→      // 4. seed existing check-ins (resume case)
+   291→      const byStudent = new Map(roster.map((r) => [r.studentId, r]))
+   292→      const checkedEntryIds = new Set<string>()
+   293→      const recent: RecentChip[] = []
+   294→      const records = [...session.records].sort(
+   295→        (a, b) => new Date(b.markedAt).getTime() - new Date(a.markedAt).getTime()
+   296→      )
+   297→      for (const rec of records) {
+   298→        if (rec.status === 'ABSENT') continue
+   299→        const entry = byStudent.get(rec.studentId)
+   300→        if (!entry) continue
+   301→        checkedEntryIds.add(entry.id)
+   302→        if (recent.length < 8) {
+   303→          recent.push({
+   304→            key: `${entry.id}-${rec.markedAt}`,
+   305→            entryId: entry.id,
+   306→            name: rec.name ?? nameOf(entry),
+   307→            time: format(new Date(rec.markedAt), 'h:mm a'),
+   308→          })
+   309→        }
+   310→      }
+   311→
+   312→      useAppStore.getState().setOpenSession({
+   313→        id: session.id,
+   314→        courseId: course.id,
+   315→        courseCode: course.code,
+   316→        mode: mode === 'KIOSK' ? 'KIOSK' : 'WALKTHROUGH',
+   317→      })
+   318→
+   319→      setLive({
+   320→        session: {
+   321→          id: session.id,
+   322→          courseId: course.id,
+   323→          courseCode: course.code,
+   324→          mode: mode === 'KIOSK' ? 'KIOSK' : 'WALKTHROUGH',
+   325→        },
+   326→        roster,
+   327→        checkedEntryIds: [...checkedEntryIds],
+   328→        recent,
+   329→      })
+   330→      setLoadStage('Starting camera…')
+   331→      setPhase('live')
+   332→    } catch (e) {
+   333→      if (bootToken.current !== token) return
+   334→      setBootError({
+   335→        title: 'Could not start scanning',
+   336→        message: getErrorMessage(e),
+   337→      })
+   338→    }
+   339→  }, [courses, selectedId, mode, ensureSession])
+   340→
+   341→  // ---- render ----
+   342→  if (phase === 'live' && live) {
+   343→    return (
+   344→      <LiveScreen
+   345→        session={live.session}
+   346→        roster={live.roster}
+   347→        initialChecked={live.checkedEntryIds}
+   348→        initialRecent={live.recent}
+   349→        liveness={settings?.liveness ?? true}
+   350→        engine={engineRef.current}
+   351→      />
+   352→    )
+   353→  }
+   354→
+   355→  if (phase === 'loading') {
+   356→    return (
+   357→      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+   358→        <div className="relative flex h-16 w-16 items-center justify-center">
+   359→          <span className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
+   360→          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+   361→            <ScanFace className="h-7 w-7" />
+   362→          </span>
+   363→        </div>
+   364→        <p className="text-sm font-medium text-muted-foreground" aria-live="polite">
+   365→          {loadStage}
+   366→        </p>
+   367→        {bootError && (
+   368→          <div className="w-full max-w-sm rounded-2xl border bg-card p-4 text-left">
+   369→            <p className="font-semibold">{bootError.title}</p>
+   370→            <p className="mt-1 text-sm text-muted-foreground">{bootError.message}</p>
+   371→            <div className="mt-4 flex gap-2">
+   372→              <Button className="flex-1" onClick={startScan}>
+   373→                <RefreshCw className="h-4 w-4" /> Retry
+   374→              </Button>
+   375→              <Button variant="outline" onClick={() => setPhase('select')}>
+   376→                Back
+   377→              </Button>
+   378→            </div>
+   379→          </div>
+   380→        )}
+   381→      </div>
+   382→    )
+   383→  }
+   384→
+   385→  // ---- select ----
+   386→  const selected = courses?.find((c) => c.id === selectedId) ?? null
+   387→  return (
+   388→    <div className="flex h-dvh flex-col bg-background">
+   389→      <header className="flex items-center gap-3 px-4 pt-safe lg:px-8" style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)', paddingBottom: 12 }}>
+   390→        <Button
+   391→          variant="ghost"
+   392→          size="icon"
+   393→          className="size-9"
+   394→          onClick={() => (useAppStore.getState().openSession ? replaceHomeSafely() : useAppStore.getState().back())}
+   395→          aria-label="Close scanner"
+   396→        >
+   397→          <X className="h-5 w-5" />
+   398→        </Button>
+   399→        <div>
+   400→          <h1 className="text-lg font-bold tracking-tight">Take attendance</h1>
+   401→          <p className="text-xs text-muted-foreground">Choose a course and scan mode</p>
+   402→        </div>
+   403→      </header>
+   404→
+   405→      <main className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-6">
+   406→        {coursesError && (
+   407→          <div className="rounded-2xl border bg-card p-4 text-sm">
+   408→            <p className="font-semibold">Couldn&apos;t load courses</p>
+   409→            <p className="mt-1 text-muted-foreground">{coursesError}</p>
+   410→          </div>
+   411→        )}
+   412→
+   413→        {!courses && !coursesError && (
+   414→          <div className="space-y-2">
+   415→            {[0, 1, 2].map((i) => (
+   416→              <div key={i} className="h-[72px] animate-pulse rounded-2xl bg-muted" />
+   417→            ))}
+   418→          </div>
+   419→        )}
+   420→
+   421→        {courses && courses.length === 0 && (
+   422→          <div className="rounded-2xl border bg-card p-6 text-center text-sm text-muted-foreground">
+   423→            No courses yet — create one from the Home screen first.
+   424→          </div>
+   425→        )}
+   426→
+   427→        {courses && courses.length > 0 && (
+   428→          <div className="space-y-3">
+   429→            <div className="space-y-2" role="radiogroup" aria-label="Course">
+   430→              {courses.map((c) => (
+   431→                <button
+   432→                  key={c.id}
+   433→                  type="button"
+   434→                  role="radio"
+   435→                  aria-checked={selectedId === c.id}
+   436→                  onClick={() => void selectCourse(c.id)}
+   437→                  className={`flex w-full items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-left transition-all min-h-11 ${
+   438→                    selectedId === c.id
+   439→                      ? 'border-primary ring-2 ring-primary/30'
+   440→                      : 'hover:bg-accent/50'
+   441→                  }`}
+   442→                >
+   443→                  <div className="min-w-0">
+   444→                    <p className="font-semibold tracking-tight">{c.code}</p>
+   445→                    <p className="truncate text-sm text-muted-foreground">{c.title}</p>
+   446→                  </div>
+   447→                  <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+   448→                    {c.studentCount} students
+   449→                  </span>
+   450→                </button>
+   451→              ))}
+   452→            </div>
+   453→
+   454→            {selected && faceCount === 0 && (
+   455→              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+   456→                No students in {selected.code} have enrolled their face yet — you can
+   457→                still mark students present manually during review.
+   458→              </div>
+   459→            )}
+   460→            {selected && (faceCount ?? 0) > 0 && (
+   461→              <p className="px-1 text-xs text-muted-foreground">
+   462→                {faceCount} of {selected.studentCount} students face-enrolled · roster cached
+   463→                for offline scanning
+   464→              </p>
+   465→            )}
+   466→            {selected && faceCount === -1 && (
+   467→              <p className="px-1 text-xs text-muted-foreground">
+   468→                Roster unavailable offline — face matching may be limited.
+   469→              </p>
+   470→            )}
+   471→
+   472→            <div>
+   473→              <p className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+   474→                Scan mode
+   475→              </p>
+   476→              <ToggleGroup
+   477→                type="single"
+   478→                value={mode}
+   479→                onValueChange={(v) => v && setMode(v as SessionMode)}
+   480→                className="w-full rounded-xl border bg-card p-1"
+   481→              >
+   482→                <ToggleGroupItem
+   483→                  value="WALKTHROUGH"
+   484→                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+   485→                >
+   486→                  <Users className="h-4 w-4" /> Walkthrough
+   487→                </ToggleGroupItem>
+   488→                <ToggleGroupItem
+   489→                  value="KIOSK"
+   490→                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+   491→                >
+   492→                  <ScanFace className="h-4 w-4" /> Kiosk
+   493→                </ToggleGroupItem>
+   494→              </ToggleGroup>
+   495→              <p className="mt-1.5 px-1 text-xs text-muted-foreground">
+   496→                {mode === 'WALKTHROUGH'
+   497→                  ? 'Walk around the hall — the app recognises each student automatically.'
+   498→                  : 'Students come to the camera one at a time with a head-turn check.'}
+   499→              </p>
+   500→            </div>
+   501→          </div>
+   502→        )}
+   503→      </main>
+   504→
+   505→      <footer className="border-t bg-card px-4 pb-safe lg:px-8" style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}>
+   506→        <Button
+   507→          className="h-12 w-full text-base font-semibold"
+   508→          disabled={!selectedId}
+   509→          onClick={() => void startScan()}
+   510→        >
+   511→          Start scanning
+   512→        </Button>
+   513→      </footer>
+   514→    </div>
+   515→  )
+   516→}
+   517→
+   518→/** Leaving scan via X while a session is open → go home without ending it. */
+   519→function replaceHomeSafely(): void {
+   520→  // keep the open session in the store so it can be resumed later
+   521→  useAppStore.getState().replace('home')
+   522→}
+   523→
+   524→// ============================================================
+   525→// LiveScreen — camera + detection loop + fallbacks
+   526→// ============================================================
+   527→
+   528→interface LiveScreenProps {
+   529→  session: { id: string; courseId: string; courseCode: string; mode: SessionMode }
+   530→  roster: RosterEntry[]
+   531→  initialChecked: string[]
+   532→  initialRecent: RecentChip[]
+   533→  liveness: boolean
+   534→  engine: FaceApi | null
+   535→}
+   536→
+   537→function LiveScreen({
+   538→  session,
+   539→  roster,
+   540→  initialChecked,
+   541→  initialRecent,
+   542→  liveness,
+   543→  engine: initialEngine,
+   544→}: LiveScreenProps) {
+   545→  const navigate = useAppStore((s) => s.navigate)
+   546→  const replace = useAppStore((s) => s.replace)
+   547→  const online = useAppStore((s) => s.online)
+   548→
+   549→  const videoRef = useRef<HTMLVideoElement | null>(null)
+   550→  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+   551→
+   552→  const [facing, setFacing] = useState<'user' | 'environment'>(
+   553→    session.mode === 'KIOSK' ? 'user' : 'environment'
+   554→  )
+   555→  const [cameraState, setCameraState] = useState<'starting' | 'ready' | 'error' | 'off'>('starting')
+   556→  const [cameraError, setCameraError] = useState('')
+   557→  const [retryKey, setRetryKey] = useState(0)
+   558→  const [exitOpen, setExitOpen] = useState(false)
+   559→  const [discarding, setDiscarding] = useState(false)
+   560→  const [engine, setEngine] = useState<FaceApi | null>(initialEngine)
+   561→
+   562→  // check-in state
+   563→  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set(initialChecked))
+   564→  const [recent, setRecent] = useState<RecentChip[]>(initialRecent)
+   565→  const [glowId, setGlowId] = useState<string | null>(null)
+   566→  const [kiosk, setKiosk] = useState<KioskUI>({ phase: 'idle' })
+   567→
+   568→  // ---- refs used inside the detection loop ----
+   569→  const checkedRef = useRef<Set<string>>(new Set(initialChecked))
+   570→  const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
+   571→  const matchersRef = useRef<{ id: string; descriptors: number[][] }[]>([])
+   572→  const hitsRef = useRef<Map<string, number>>(new Map())
+   573→  const challengeRef = useRef<{ entryId: string; target: 'left' | 'right'; deadline: number } | null>(null)
+   574→  const kioskRef = useRef<KioskUI>(kiosk)
+   575→  const mirrorRef = useRef(facing === 'user')
+   576→  const busyRef = useRef(false)
+   577→  const aliveRef = useRef(true)
+   578→  const streamRef = useRef<MediaStream | null>(null)
+   579→
+   580→  // sync machinery
+   581→  const bufferRef = useRef<Map<string, AttendanceRecord>>(new Map())
+   582→  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   583→  const syncingRef = useRef(false)
+   584→  const dirtyRef = useRef(false)
+   585→  const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   586→  const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   587→  const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   588→
+   589→  // ---------- static maps ----------
+   590→  useEffect(() => {
+   591→    rosterByIdRef.current = new Map(roster.map((r) => [r.id, r]))
+   592→    matchersRef.current = roster
+   593→      .filter((r) => r.descriptors.length > 0)
+   594→      .map((r) => ({ id: r.id, descriptors: r.descriptors }))
+   595→  }, [roster])
+   596→
+   597→  useEffect(() => {
+   598→    mirrorRef.current = facing === 'user'
+   599→  }, [facing])
+   600→
+   601→  // engine (singleton — resolves instantly if already loaded)
+   602→  useEffect(() => {
+   603→    let alive = true
+   604→    loadFaceEngine()
+   605→      .then((f) => {
+   606→        if (alive) setEngine(f)
+   607→      })
+   608→      .catch(() => {})
+   609→    return () => {
+   610→      alive = false
+   611→    }
+   612→  }, [])
+   613→
+   614→  // ---------- camera ----------
+   615→  useEffect(() => {
+   616→    let cancelled = false
+   617→    let localStream: MediaStream | null = null
+   618→    const video = videoRef.current
+   619→    if (!video) return
+   620→
+   621→    setCameraState('starting')
+   622→    startCamera(video, facing)
+   623→      .then((s) => {
+   624→        if (cancelled) {
+   625→          stopCamera(s)
+   626→          return
+   627→        }
+   628→        localStream = s
+   629→        streamRef.current = s
+   630→        setCameraState('ready')
+   631→      })
+   632→      .catch((e) => {
+   633→        if (cancelled) return
+   634→        setCameraError(getErrorMessage(e))
+   635→        setCameraState('error')
+   636→      })
+   637→
+   638→    return () => {
+   639→      cancelled = true
+   640→      if (localStream) {
+   641→        stopCamera(localStream, videoRef.current)
+   642→        if (streamRef.current === localStream) streamRef.current = null
+   643→      }
+   644→    }
+   645→  }, [facing, retryKey])
+   646→
+   647→  // ---------- check-in + sync ----------
+   648→  const flushSync = useCallback(async () => {
+   649→    if (syncingRef.current) {
+   650→      dirtyRef.current = true
+   651→      return
+   652→    }
+   653→    const records = [...bufferRef.current.values()]
+   654→    if (records.length === 0) return
+   655→    syncingRef.current = true
+   656→    try {
+   657→      await api<{ saved: number }>(`/api/sessions/${session.id}/sync`, {
+   658→        method: 'POST',
+   659→        body: {
+   660→          records: records.map<AttendanceRecord>((r) => ({
+   661→            studentId: r.studentId,
+   662→            name: r.name,
+   663→            status: r.status,
+   664→            confidence: r.confidence ?? null,
+   665→            markedAt: r.markedAt,
+   666→          })),
+   667→        },
+   668→      })
+   669→      for (const r of records) {
+   670→        bufferRef.current.delete(r.studentId)
+   671→        removeQueued(session.id, r.studentId)
+   672→      }
+   673→      useAppStore.getState().setPendingSync(pendingCount())
+   674→    } catch {
+   675→      // stay queued — global flushQueue retries on reconnect
+   676→    } finally {
+   677→      syncingRef.current = false
+   678→      if (dirtyRef.current) {
+   679→        dirtyRef.current = false
+   680→        setTimeout(() => void flushSyncRef.current(), 1000)
+   681→      }
+   682→    }
+   683→  }, [session.id])
+   684→
+   685→  const flushSyncRef = useRef(flushSync)
+   686→  flushSyncRef.current = flushSync
+   687→
+   688→  const scheduleSync = useCallback((rec: PendingRecord) => {
+   689→    bufferRef.current.set(rec.studentId, {
+   690→      studentId: rec.studentId,
+   691→      name: rec.name,
+   692→      status: rec.status,
+   693→      confidence: rec.confidence ?? null,
+   694→      markedAt: rec.markedAt,
+   695→    })
+   696→    if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
+   697→    syncTimerRef.current = setTimeout(() => void flushSyncRef.current(), SYNC_DEBOUNCE_MS)
+   698→  }, [])
+   699→
+   700→  const glow = useCallback((entryId: string) => {
+   701→    setGlowId(entryId)
+   702→    if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
+   703→    glowTimerRef.current = setTimeout(() => setGlowId(null), 1600)
+   704→  }, [])
+   705→
+   706→  const checkIn = useCallback(
+   707→    (entry: RosterEntry, distance?: number): boolean => {
+   708→      if (checkedRef.current.has(entry.id)) {
+   709→        glow(entry.id)
+   710→        return false
+   711→      }
+   712→      checkedRef.current.add(entry.id)
+   713→      const rec: PendingRecord = {
+   714→        sessionId: session.id,
+   715→        studentId: entry.id, // DB id — matches sync API + review merge
+   716→        name: nameOf(entry),
+   717→        status: 'PRESENT',
+   718→        confidence: distance != null ? confidenceOf(distance) : null,
+   719→        markedAt: new Date().toISOString(),
+   720→      }
+   721→      queueRecord(rec)
+   722→      scheduleSync(rec)
+   723→      setCheckedIds((prev) => {
+   724→        const next = new Set(prev)
+   725→        next.add(entry.id)
+   726→        return next
+   727→      })
+   728→      setRecent((prev) =>
+   729→        [
+   730→          {
+   731→            key: `${entry.id}-${rec.markedAt}`,
+   732→            entryId: entry.id,
+   733→            name: rec.name ?? '',
+   734→            time: format(new Date(rec.markedAt), 'h:mm a'),
+   735→          },
+   736→          ...prev,
+   737→        ].slice(0, RECENT_MAX)
+   738→      )
+   739→      navigator.vibrate?.(60)
+   740→      return true
+   741→    },
+   742→    [session.id, scheduleSync, glow]
+   743→  )
+   744→
+   745→  const fnRef = useRef({ checkIn, flushSync })
+   746→  fnRef.current = { checkIn, flushSync }
+   747→
+   748→  // ---------- kiosk UI helpers ----------
+   749→  const setKioskBoth = useCallback((ui: KioskUI) => {
+   750→    kioskRef.current = ui
+   751→    setKiosk(ui)
+   752→  }, [])
+   753→
+   754→  const kioskIdle = useCallback(
+   755→    (message?: string) => {
+   756→      challengeRef.current = null
+   757→      setKioskBoth({ phase: 'idle', message })
+   758→      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
+   759→      if (message) {
+   760→        msgTimerRef.current = setTimeout(() => {
+   761→          if (kioskRef.current.phase === 'idle') setKioskBoth({ phase: 'idle' })
+   762→        }, 1800)
+   763→      }
+   764→    },
+   765→    [setKioskBoth]
+   766→  )
+   767→
+   768→  const kioskCelebrate = useCallback(
+   769→    (entry: RosterEntry, distance?: number) => {
+   770→      fnRef.current.checkIn(entry, distance)
+   771→      challengeRef.current = null
+   772→      setKioskBoth({
+   773→        phase: 'success',
+   774→        name: entry.firstName,
+   775→        studentId: entry.studentId,
+   776→      })
+   777→      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   778→      kioskTimerRef.current = setTimeout(() => {
+   779→        setKioskBoth({ phase: 'idle' })
+   780→      }, 2200)
+   781→    },
+   782→    [setKioskBoth]
+   783→  )
+   784→
+   785→  // ---------- detection loop ----------
+   786→  useEffect(() => {
+   787→    aliveRef.current = true
+   788→    if (cameraState !== 'ready' || !engine) return
+   789→    let raf = 0
+   790→    let last = 0
+   791→
+   792→    const walkthroughStep = async () => {
+   793→      const video = videoRef.current
+   794→      const canvas = canvasRef.current
+   795→      if (!video || !canvas) return
+   796→      const faces = await detectAll(engine, video, 256)
+   797→      if (!aliveRef.current) return
+   798→      const matches: (FaceMatchInfo | null)[] = faces.map((f) => {
+   799→        const m = bestMatch(f.descriptor, matchersRef.current, WALKTHROUGH_THRESHOLD)
+   800→        if (!m) return null
+   801→        const entry = rosterByIdRef.current.get(m.id)
+   802→        return entry ? { id: m.id, name: nameOf(entry), distance: m.distance } : null
+   803→      })
+   804→      drawOverlay(canvas, video, faces, matches, { mirror: mirrorRef.current })
+   805→
+   806→      const seen = new Set<string>()
+   807→      faces.forEach((_, i) => {
+   808→        const m = matches[i]
+   809→        if (!m) return
+   810→        seen.add(m.id)
+   811→        const hits = (hitsRef.current.get(m.id) ?? 0) + 1
+   812→        hitsRef.current.set(m.id, hits)
+   813→        if (hits >= CONSECUTIVE_FRAMES) {
+   814→          hitsRef.current.delete(m.id)
+   815→          const entry = rosterByIdRef.current.get(m.id)
+   816→          if (entry) fnRef.current.checkIn(entry, m.distance)
+   817→        }
+   818→      })
+   819→      for (const key of [...hitsRef.current.keys()]) {
+   820→        if (!seen.has(key)) hitsRef.current.delete(key)
+   821→      }
+   822→    }
+   823→
+   824→    const kioskStep = async () => {
+   825→      const video = videoRef.current
+   826→      const canvas = canvasRef.current
+   827→      if (!video || !canvas) return
+   828→      const face = await detectSingle(engine, video, 320)
+   829→      if (!aliveRef.current) return
+   830→      const ui = kioskRef.current
+   831→
+   832→      if (!face) {
+   833→        drawOverlay(canvas, video, [], [], { mirror: mirrorRef.current })
+   834→        if (
+   835→          ui.phase === 'challenge' &&
+   836→          challengeRef.current &&
+   837→          Date.now() > challengeRef.current.deadline
+   838→        ) {
+   839→          kioskIdle("Time's up — look at the camera and try again")
+   840→        }
+   841→        return
+   842→      }
+   843→
+   844→      const m = bestMatch(face.descriptor, matchersRef.current, KIOSK_THRESHOLD)
+   845→      const matchInfo: FaceMatchInfo | null = m
+   846→        ? (() => {
+   847→            const entry = rosterByIdRef.current.get(m.id)
+   848→            return entry ? { id: m.id, name: nameOf(entry), distance: m.distance } : null
+   849→          })()
+   850→        : null
+   851→      drawOverlay(canvas, video, [face], [matchInfo], { mirror: mirrorRef.current })
+   852→
+   853→      if (ui.phase === 'idle') {
+   854→        if (!matchInfo) return
+   855→        const entry = rosterByIdRef.current.get(matchInfo.id)
+   856→        if (!entry) return
+   857→        if (checkedRef.current.has(entry.id)) {
+   858→          glow(entry.id)
+   859→          setKioskBoth({
+   860→            phase: 'info',
+   861→            name: nameOf(entry),
+   862→            studentId: entry.studentId,
+   863→          })
+   864→          if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   865→          kioskTimerRef.current = setTimeout(() => setKioskBoth({ phase: 'idle' }), 2200)
+   866→          return
+   867→        }
+   868→        if (liveness) {
+   869→          const target: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right'
+   870→          challengeRef.current = {
+   871→            entryId: entry.id,
+   872→            target,
+   873→            deadline: Date.now() + CHALLENGE_MS,
+   874→          }
+   875→          setKioskBoth({
+   876→            phase: 'challenge',
+   877→            target,
+   878→            name: entry.firstName,
+   879→            nonce: Date.now(),
+   880→          })
+   881→        } else {
+   882→          kioskCelebrate(entry, matchInfo.distance)
+   883→        }
+   884→        return
+   885→      }
+   886→
+   887→      if (ui.phase === 'challenge') {
+   888→        const ch = challengeRef.current
+   889→        if (!ch) {
+   890→          setKioskBoth({ phase: 'idle' })
+   891→          return
+   892→        }
+   893→        if (Date.now() > ch.deadline) {
+   894→          kioskIdle("Time's up — look at the camera and try again")
+   895→          return
+   896→        }
+   897→        if (matchInfo && matchInfo.id !== ch.entryId) {
+   898→          // a different student stepped up — restart the challenge
+   899→          const entry = rosterByIdRef.current.get(matchInfo.id)
+   900→          if (entry) {
+   901→            const target: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right'
+   902→            challengeRef.current = {
+   903→              entryId: entry.id,
+   904→              target,
+   905→              deadline: Date.now() + CHALLENGE_MS,
+   906→            }
+   907→            setKioskBoth({
+   908→              phase: 'challenge',
+   909→              target,
+   910→              name: entry.firstName,
+   911→              nonce: Date.now(),
+   912→            })
+   913→          }
+   914→          return
+   915→        }
+   916→        const off = noseOffset(face)
+   917→        if (
+   918→          (ch.target === 'left' && off > TURN_OFFSET) ||
+   919→          (ch.target === 'right' && off < -TURN_OFFSET)
+   920→        ) {
+   921→          const entry = rosterByIdRef.current.get(ch.entryId)
+   922→          if (entry) kioskCelebrate(entry, matchInfo?.distance)
+   923→        }
+   924→      }
+   925→      // 'success' | 'info' — just keep boxes drawn
+   926→    }
+   927→
+   928→    const tick = (t: number) => {
+   929→      raf = requestAnimationFrame(tick)
+   930→      if (t - last < DETECT_INTERVAL_MS) return
+   931→      last = t
+   932→      if (busyRef.current) return
+   933→      const video = videoRef.current
+   934→      if (!video || video.readyState < 2) return
+   935→      busyRef.current = true
+   936→      const step = session.mode === 'KIOSK' ? kioskStep() : walkthroughStep()
+   937→      void step
+   938→        .catch(() => {})
+   939→        .finally(() => {
+   940→          busyRef.current = false
+   941→        })
+   942→    }
+   943→    raf = requestAnimationFrame(tick)
+   944→
+   945→    return () => {
+   946→      aliveRef.current = false
+   947→      cancelAnimationFrame(raf)
+   948→    }
+   949→  }, [
+   950→    cameraState,
+   951→    engine,
+   952→    session.mode,
+   953→    liveness,
+   954→    kioskIdle,
+   955→    setKioskBoth,
+   956→    glow,
+   957→    kioskCelebrate,
+   958→  ])
+   959→
+   960→  // ---------- lifecycle cleanup ----------
+   961→  useEffect(() => {
+   962→    return () => {
+   963→      aliveRef.current = false
+   964→      stopCamera(streamRef.current, videoRef.current)
+   965→      streamRef.current = null
+   966→      if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
+   967→      if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
+   968→      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   969→      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
+   970→      void flushSyncRef.current()
+   971→    }
+   972→  }, [])
+   973→
+   974→  // ---------- end / discard ----------
+   975→  const endAndReview = useCallback(() => {
+   976→    setExitOpen(false)
+   977→    void flushSyncRef.current()
+   978→    navigate('review', { sessionId: session.id })
+   979→  }, [navigate, session.id])
+   980→
+   981→  const discardSession = useCallback(async () => {
+   982→    setExitOpen(false)
+   983→    setDiscarding(true)
+   984→    try {
+   985→      await api<{ ok: boolean }>(`/api/sessions/${session.id}`, { method: 'DELETE' })
+   986→      for (const rec of pendingForSession(session.id)) {
+   987→        removeQueued(session.id, rec.studentId)
+   988→      }
+   989→      useAppStore.getState().setPendingSync(pendingCount())
+   990→      useAppStore.getState().setOpenSession(null)
+   991→      replace('home')
+   992→    } catch (e) {
+   993→      toast.error(getErrorMessage(e))
+   994→    } finally {
+   995→      setDiscarding(false)
+   996→    }
+   997→  }, [replace, session.id])
+   998→
+   999→  const cameraUnavailable = cameraState === 'error' || cameraState === 'off'
+  1000→
+  1001→  // ---------- render ----------
+  1002→  return (
+  1003→    <div className="fixed inset-0 flex h-dvh flex-col bg-black text-white">
+  1004→      {/* top bar */}
+  1005→      <header className="flex items-center gap-2 bg-black/80 px-3 pt-safe" style={{ paddingTop: 'max(env(safe-area-inset-top), 10px)', paddingBottom: 10 }}>
+  1006→        <Button
+  1007→          variant="ghost"
+  1008→          size="icon"
+  1009→          className="size-10 shrink-0 text-white hover:bg-white/15"
+  1010→          onClick={() => setExitOpen(true)}
+  1011→          aria-label="End scanning"
+  1012→        >
+  1013→          <X className="h-5 w-5" />
+  1014→        </Button>
+  1015→        <div className="flex min-w-0 flex-1 items-center gap-2">
+  1016→          <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold tracking-wide">
+  1017→            {session.courseCode}
+  1018→          </span>
+  1019→          <span
+  1020→            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${
+  1021→              checkedIds.size > 0 ? 'bg-emerald-500 text-emerald-950' : 'bg-white/10 text-white/80'
+  1022→            }`}
+  1023→            aria-label={`${checkedIds.size} of ${roster.length} checked in`}
+  1024→          >
+  1025→            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+  1026→            {checkedIds.size} / {roster.length}
+  1027→          </span>
+  1028→          {!online && (
+  1029→            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-semibold text-amber-300">
+  1030→              <WifiOff className="h-3 w-3" /> Offline — saving on device
+  1031→            </span>
+  1032→          )}
+  1033→        </div>
+  1034→        <Button
+  1035→          variant="ghost"
+  1036→          size="icon"
+  1037→          className="size-10 shrink-0 text-white hover:bg-white/15"
+  1038→          onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
+  1039→          aria-label="Flip camera"
+  1040→          disabled={cameraState === 'off'}
+  1041→        >
+  1042→          <SwitchCamera className="h-5 w-5" />
+  1043→        </Button>
+  1044→      </header>
+  1045→
+  1046→      {/* video area */}
+  1047→      <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
+  1048→        <video
+  1049→          ref={videoRef}
+  1050→          className="absolute inset-0 h-full w-full object-cover"
+  1051→          style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
+  1052→          playsInline
+  1053→          muted
+  1054→          autoPlay
+  1055→        />
+  1056→        <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+  1057→
+  1058→        {cameraState === 'starting' && (
+  1059→          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+  1060→            <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+  1061→            <p className="text-sm text-white/80">Starting camera…</p>
+  1062→          </div>
+  1063→        )}
+  1064→
+  1065→        {cameraUnavailable && (
+  1066→          <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 p-6">
+  1067→            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
+  1068→              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+  1069→                <CameraOff className="h-6 w-6" />
+  1070→              </div>
+  1071→              <p className="mt-3 font-semibold">Camera unavailable</p>
+  1072→              <p className="mt-1 text-sm text-white/70">
+  1073→                {cameraError || 'Check the browser permission and try again.'}
+  1074→              </p>
+  1075→              <div className="mt-4 flex flex-col gap-2">
+  1076→                <Button
+  1077→                  className="h-11"
+  1078→                  onClick={() => {
+  1079→                    setCameraError('')
+  1080→                    setCameraState('starting')
+  1081→                    setRetryKey((k) => k + 1)
+  1082→                  }}
+  1083→                >
+  1084→                  <RefreshCw className="h-4 w-4" /> Retry camera
+  1085→                </Button>
+  1086→              </div>
+  1087→            </div>
+  1088→          </div>
+  1089→        )}
+  1090→
+  1091→        {/* kiosk giant state machine */}
+  1092→        {session.mode === 'KIOSK' && cameraState === 'ready' && (
+  1093→          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pb-8 pt-16 text-center">
+  1094→            <KioskOverlay ui={kiosk} />
+  1095→          </div>
+  1096→        )}
+  1097→      </div>
+  1098→
+  1099→      {/* bottom panel */}
+  1100→      {session.mode === 'KIOSK' ? (
+  1101→        <footer className="bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
+  1102→          <div className="px-4">
+  1103→            <Button className="h-12 w-full text-base font-semibold" onClick={endAndReview}>
+  1104→              End &amp; review
+  1105→            </Button>
+  1106→          </div>
+  1107→        </footer>
+  1108→      ) : (
+  1109→        <footer className="border-t bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
+  1110→          <div className="no-scrollbar mb-2.5 flex gap-2 overflow-x-auto px-4" aria-live="polite">
+  1111→            <AnimatePresence initial={false} mode="popLayout">
+  1112→              {recent.length === 0 && (
+  1113→                <motion.span
+  1114→                  key="empty"
+  1115→                  initial={{ opacity: 0 }}
+  1116→                  animate={{ opacity: 1 }}
+  1117→                  exit={{ opacity: 0 }}
+  1118→                  className="py-1 text-xs text-muted-foreground"
+  1119→                >
+  1120→                  Check-ins will appear here…
+  1121→                </motion.span>
+  1122→              )}
+  1123→              {recent.map((chip) => (
+  1124→                <motion.span
+  1125→                  key={chip.key}
+  1126→                  layout
+  1127→                  initial={{ opacity: 0, scale: 0.7, y: 10 }}
+  1128→                  animate={{ opacity: 1, scale: 1, y: 0 }}
+  1129→                  exit={{ opacity: 0, scale: 0.7 }}
+  1130→                  transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+  1131→                  className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
+  1132→                    glowId === chip.entryId
+  1133→                      ? 'border-emerald-400 ring-2 ring-emerald-400/60'
+  1134→                      : 'border-border'
+  1135→                  }`}
+  1136→                >
+  1137→                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600/15 text-emerald-700 dark:text-emerald-400">
+  1138→                    <Check className="h-3 w-3" strokeWidth={3} />
+  1139→                  </span>
+  1140→                  <span className="max-w-36 truncate font-semibold">{chip.name}</span>
+  1141→                  <span className="tabular-nums text-muted-foreground">{chip.time}</span>
+  1142→                </motion.span>
+  1143→              ))}
+  1144→            </AnimatePresence>
+  1145→          </div>
+  1146→          <div className="px-4">
+  1147→            <Button className="h-12 w-full text-base font-semibold" onClick={endAndReview}>
+  1148→              End &amp; review
+  1149→            </Button>
+  1150→          </div>
+  1151→        </footer>
+  1152→      )}
+  1153→
+  1154→      {/* exit dialog */}
+  1155→      <AlertDialog open={exitOpen} onOpenChange={setExitOpen}>
+  1156→        <AlertDialogContent className="max-w-sm rounded-2xl">
+  1157→          <AlertDialogTitle>End scanning?</AlertDialogTitle>
+  1158→          <AlertDialogDescription>
+  1159→            {checkedIds.size > 0
+  1160→              ? `${checkedIds.size} of ${roster.length} students checked in this session.`
+  1161→              : 'No one has checked in yet.'}
+  1162→          </AlertDialogDescription>
+  1163→          <AlertDialogFooter className="flex-col gap-2">
+  1164→            <Button className="h-11 w-full" onClick={endAndReview} disabled={discarding}>
+  1165→              End &amp; review
+  1166→            </Button>
+  1167→            <Button
+  1168→              variant="outline"
+  1169→              className="h-11 w-full"
+  1170→              onClick={() => setExitOpen(false)}
+  1171→              disabled={discarding}
+  1172→            >
+  1173→              Keep scanning
+  1174→            </Button>
+  1175→            <Button
+  1176→              variant="ghost"
+  1177→              className="h-11 w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+  1178→              onClick={() => void discardSession()}
+  1179→              disabled={discarding}
+  1180→            >
+  1181→              <LogOut className="h-4 w-4" /> Discard session
+  1182→            </Button>
+  1183→          </AlertDialogFooter>
+  1184→        </AlertDialogContent>
+  1185→      </AlertDialog>
+  1186→
+  1187→    </div>
+  1188→  )
+  1189→}
+  1190→
+  1191→// ---------- Kiosk overlay ----------
+  1192→
+  1193→function KioskOverlay({ ui }: { ui: KioskUI }) {
+  1194→  if (ui.phase === 'success') {
+  1195→    return (
+  1196→      <motion.div
+  1197→        key="success"
+  1198→        initial={{ opacity: 0, scale: 0.7 }}
+  1199→        animate={{ opacity: 1, scale: 1 }}
+  1200→        transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+  1201→        className="flex flex-col items-center gap-3"
+  1202→      >
+  1203→        <motion.div
+  1204→          initial={{ scale: 0, rotate: -30 }}
+  1205→          animate={{ scale: 1, rotate: 0 }}
+  1206→          transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
+  1207→          className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 shadow-xl shadow-emerald-500/40"
+  1208→        >
+  1209→          <Check className="h-14 w-14 text-emerald-950" strokeWidth={3.5} />
+  1210→        </motion.div>
+  1211→        <p className="text-4xl font-extrabold tracking-tight">Welcome, {ui.name}</p>
+  1212→        <p className="text-xl font-semibold tabular-nums text-white/80">{ui.studentId}</p>
+  1213→      </motion.div>
+  1214→    )
+  1215→  }
+  1216→
+  1217→  if (ui.phase === 'info') {
+  1218→    return (
+  1219→      <motion.div
+  1220→        key="info"
+  1221→        initial={{ opacity: 0, y: 14 }}
+  1222→        animate={{ opacity: 1, y: 0 }}
+  1223→        className="flex flex-col items-center gap-2"
+  1224→      >
+  1225→        <p className="text-3xl font-bold text-amber-400">{ui.name}</p>
+  1226→        <p className="text-xl font-semibold text-white/85">Already checked in ✓</p>
+  1227→      </motion.div>
+  1228→    )
+  1229→  }
+  1230→
+  1231→  if (ui.phase === 'challenge' && ui.target) {
+  1232→    const isLeft = ui.target === 'left'
+  1233→    const Arrow = isLeft ? ArrowLeft : ArrowRight
+  1234→    return (
+  1235→      <div key={`challenge-${ui.nonce ?? ''}`} className="flex flex-col items-center gap-2">
+  1236→        <motion.div
+  1237→          animate={{ x: isLeft ? [-8, -22, -8] : [8, 22, 8] }}
+  1238→          transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
+  1239→          className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-500 text-amber-950 shadow-xl shadow-amber-500/40"
+  1240→        >
+  1241→          <Arrow className="h-11 w-11" strokeWidth={3} />
+  1242→        </motion.div>
+  1243→        <p className="text-5xl font-extrabold tracking-tight">
+  1244→          Turn {isLeft ? 'LEFT' : 'RIGHT'}
+  1245→        </p>
+  1246→        <p className="text-lg font-medium text-white/75">to confirm it&apos;s really you, {ui.name}</p>
+  1247→        <div className="mt-1 h-1.5 w-48 overflow-hidden rounded-full bg-white/20">
+  1248→          <motion.div
+  1249→            className="h-full bg-amber-400"
+  1250→            initial={{ width: '100%' }}
+  1251→            animate={{ width: '0%' }}
+  1252→            transition={{ duration: CHALLENGE_MS / 1000, ease: 'linear' }}
+  1253→          />
+  1254→        </div>
+  1255→      </div>
+  1256→    )
+  1257→  }
+  1258→
+  1259→  return (
+  1260→    <div key="idle" className="flex flex-col items-center gap-1.5">
+  1261→      <p className="text-3xl font-bold tracking-tight sm:text-4xl">
+  1262→        {ui.message ?? 'Look at the camera'}
+  1263→      </p>
+  1264→      {!ui.message && (
+  1265→        <p className="text-base text-white/70">
+  1266→          Stand about an arm&apos;s length away — you&apos;ll be checked in automatically
+  1267→        </p>
+  1268→      )}
+  1269→    </div>
+  1270→  )
+  1271→}
+  1272→

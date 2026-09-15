@@ -150,3 +150,17 @@ Work Log:
 Stage Summary:
 - All QR/PIN references (code + copy) are now fully eradicated; app is cleanly single-method (face) with manual review override as the only fallback.
 - Decision recorded: fingerprint (WebAuthn/passkey self-check-in) deferred to Phase 2 post-deployment; requires student accounts + HTTPS + student-owned devices.
+
+---
+Task ID: 12
+Agent: Z.ai (orchestrator)
+Task: Add manual in-class check-in ("Add manually") to the live scan screen — replaces the removed PIN as the no-face path; verify both manual paths E2E.
+
+Work Log:
+- Answered user question "is there a way to check a student in manually": review screen already had P/L/A override, but NO manual path existed during class. Built it.
+- scan.tsx LiveScreen: added "Add manually" outline button (UserPlus) to BOTH footers (walkthrough + kiosk) beside "End & review"; opens a bottom Sheet with search input (name or student ID), scrollable roster list (avatar + name + mono ID), tap-to-check-in rows that disappear once checked, live "N of M still to check in" counter, Done button. manualCheckIn() reuses existing checkIn() (queues record, syncs, counter chips, vibrate) + success/info toast; works offline (cached roster + offline queue) and even when the camera is unavailable.
+- BUG FOUND & FIXED during E2E: sheet rendered 2569px tall in a 577px viewport — shadcn SheetContent side="bottom" ships h-auto which overrode h-[82dvh]; flex-1 had no constraint so the list rendered full-height and rows sat at y=-1818 (off-screen); agent-browser clicks hit the overlay → Radix dismissed the sheet, check-ins never fired. Fix: max-h-[85dvh] + shrink-0 on header/search/footer + min-h-0 flex-1 overflow-y-auto list; removed autoFocus (keyboard would cover list on phones). Verified via elementFromPoint hit-test (clickable:true, sheet 490px on-screen).
+- E2E (desktop 1280 + iPhone 14 390x844): login → scan select → CS301 walkthrough → live → Add manually → tapped Adwoa Addo + Kofi Agyeman (counter 0/38→2/38, toasts, rows removed, sheet stays open for multi-add) → Done → End & review → stats 2 Present/36 Absent → review-screen P override on 3rd student → 3 Present → Submit attendance → finalize 200 → home shows COMPLETED session. API check: session COMPLETED, present = [Adwoa Addo, Kofi Agyeman, Abena Appiah]. Second pass: mobile sheet fits (717px ≤ viewport, rows + Done visible), tap registers, discard-session path verified, DB left with no OPEN sessions. lint + tsc clean; dev.log 0 x 401/500.
+
+Stage Summary:
+- Two manual paths now exist: (1) DURING class — "Add manually" sheet in the live scan screen (search + tap, multi-add, works offline and with camera broken); (2) AT END — review screen P/L/A override before submitting. This fully replaces the removed PIN as the fallback for face opt-outs / failed matches, with zero credentials to manage.
