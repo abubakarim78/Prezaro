@@ -9,15 +9,6 @@ import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
-
-const DEMO_PASSWORD = 'classcheck'
-
-const DEMO_ACCOUNTS = [
-  { name: 'Prof. Abena Owusu', role: 'Admin', email: 'hod@classcheck.edu' },
-  { name: 'Dr. Ama Mensah', role: 'Lecturer', email: 'lecturer@classcheck.edu' },
-  { name: 'Mr. Kwame Oteng', role: 'Lecturer', email: 'kwame@classcheck.edu' },
-] as const
 
 export default function LoginView() {
   const setUser = useAppStore((s) => s.setUser)
@@ -29,10 +20,10 @@ export default function LoginView() {
   const [loading, setLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  const submit = async (e?: React.FormEvent, overrideEmail?: string, overridePw?: string) => {
+  const submit = async (e?: React.FormEvent) => {
     e?.preventDefault()
-    const em = (overrideEmail ?? email).trim()
-    const pw = overridePw ?? password
+    const em = email.trim()
+    const pw = password
     if (loading) return
     if (!em || !pw) {
       setFormError('Enter your email and password to continue')
@@ -158,59 +149,6 @@ export default function LoginView() {
               )}
             </Button>
           </form>
-        </div>
-
-        {/* Demo accounts */}
-        <div className="mt-6">
-          <p className="mb-2 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Demo accounts
-          </p>
-          <div className="space-y-2">
-            {DEMO_ACCOUNTS.map((acc) => (
-              <button
-                key={acc.email}
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setEmail(acc.email)
-                  setPassword(DEMO_PASSWORD)
-                  submit(undefined, acc.email, DEMO_PASSWORD)
-                }}
-                className={cn(
-                  'flex min-h-11 w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-colors',
-                  'hover:border-primary/40 hover:bg-accent/60 disabled:opacity-60'
-                )}
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
-                  {acc.name
-                    .split(' ')
-                    .slice(-2)
-                    .map((p) => p[0])
-                    .join('')}
-                </span>
-                <span className="min-w-0 flex-1 leading-tight">
-                  <span className="block truncate text-sm font-medium">{acc.name}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {acc.email}
-                  </span>
-                </span>
-                <span
-                  className={cn(
-                    'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                    acc.role === 'Admin'
-                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-                      : 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400'
-                  )}
-                >
-                  {acc.role}
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="mt-3 text-center text-[11px] text-muted-foreground">
-            Password for all demo accounts is{' '}
-            <span className="font-mono font-medium">classcheck</span>
-          </p>
         </div>
       </motion.div>
     </div>

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Eye,
   Footprints,
+  KeyRound,
   Monitor,
   MonitorSmartphone,
   Moon,
@@ -222,6 +223,43 @@ export default function SettingsView() {
     clearAuthToken()
     setUser(null)
     replace('login')
+  }
+
+  // ---- Change password ----------------------------------------
+  const [pwOpen, setPwOpen] = useState(false)
+  const [pwCurrent, setPwCurrent] = useState('')
+  const [pwNew, setPwNew] = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwError, setPwError] = useState<string | null>(null)
+
+  const changePassword = async () => {
+    if (pwSaving) return
+    if (pwNew.length < 8) {
+      setPwError('New password must be at least 8 characters')
+      return
+    }
+    if (pwNew !== pwConfirm) {
+      setPwError('New passwords do not match')
+      return
+    }
+    setPwSaving(true)
+    setPwError(null)
+    try {
+      await api('/api/auth/change-password', {
+        method: 'POST',
+        body: { currentPassword: pwCurrent, newPassword: pwNew },
+      })
+      toast.success('Password updated')
+      setPwOpen(false)
+      setPwCurrent('')
+      setPwNew('')
+      setPwConfirm('')
+    } catch (e) {
+      setPwError(getErrorMessage(e))
+    } finally {
+      setPwSaving(false)
+    }
   }
 
   if (!user) return null
@@ -497,6 +535,18 @@ export default function SettingsView() {
         <section className="rounded-2xl border bg-card p-4 sm:p-6" aria-label="Account">
           <Button
             variant="outline"
+            className="min-h-11 w-full"
+            onClick={() => {
+              setPwError(null)
+              setPwOpen(true)
+            }}
+          >
+            <KeyRound className="h-4 w-4" />
+            Change password
+          </Button>
+          <Separator className="my-4" />
+          <Button
+            variant="outline"
             className="min-h-11 w-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => void signOut()}
           >
@@ -549,6 +599,78 @@ export default function SettingsView() {
               onClick={() => void saveProfile()}
             >
               {savingProfile ? 'Saving…' : 'Save changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ---------- Change password dialog ---------- */}
+      <Dialog open={pwOpen} onOpenChange={setPwOpen}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Change password</DialogTitle>
+            <DialogDescription>
+              Use at least 8 characters. You stay signed in on this device.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="pw-current">Current password</Label>
+              <Input
+                id="pw-current"
+                type="password"
+                autoComplete="current-password"
+                value={pwCurrent}
+                onChange={(e) => {
+                  setPwCurrent(e.target.value)
+                  if (pwError) setPwError(null)
+                }}
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pw-new">New password</Label>
+              <Input
+                id="pw-new"
+                type="password"
+                autoComplete="new-password"
+                value={pwNew}
+                onChange={(e) => {
+                  setPwNew(e.target.value)
+                  if (pwError) setPwError(null)
+                }}
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pw-confirm">Confirm new password</Label>
+              <Input
+                id="pw-confirm"
+                type="password"
+                autoComplete="new-password"
+                value={pwConfirm}
+                onChange={(e) => {
+                  setPwConfirm(e.target.value)
+                  if (pwError) setPwError(null)
+                }}
+                className="h-11"
+              />
+            </div>
+            {pwError && (
+              <p className="text-sm font-medium text-destructive" role="alert">
+                {pwError}
+              </p>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" className="min-h-11" onClick={() => setPwOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="min-h-11"
+              disabled={pwSaving || !pwCurrent || !pwNew || !pwConfirm}
+              onClick={() => void changePassword()}
+            >
+              {pwSaving ? 'Updating…' : 'Update password'}
             </Button>
           </DialogFooter>
         </DialogContent>

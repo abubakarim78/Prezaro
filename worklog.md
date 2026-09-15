@@ -178,3 +178,19 @@ Work Log:
 
 Stage Summary:
 - One-command deployment is ready: on any Linux host with Docker + a domain, `cd deploy && DOMAIN=... BOOTSTRAP_EMAIL=... BOOTSTRAP_PASSWORD=... AUTH_SECRET=... docker compose --profile https up -d --build` gives HTTPS ClassCheck with a persistent volume; PWA is installable from the domain; face enrollment/camera + future WebAuthn fingerprint (Phase 2) work there. Prod DB starts clean (no demo data) — admin bootstraps, then imports real students via CSV and creates real courses.
+
+---
+Task ID: 14
+Agent: Z.ai (orchestrator)
+Task: Wipe ALL seed/demo data for live production + create the single production admin + add change-password.
+
+Work Log:
+- DB wipe (FK-safe order via Prisma): deleted all Departments, Users (3 demo), Courses (4), Students (44 incl. the user's 2 PHA test entries), Enrollments (119), Sessions (48), AttendanceRecords (1038). Final state: 0 rows everywhere except ONE new admin user.
+- Production admin created: admin@classcheck.edu / ChangeMe2026! (bcrypt 10), role ADMIN, onboarded=false so the real first login walks the onboarding wizard (name/title -> create real department -> courses).
+- New feature: POST /api/auth/change-password (zod: current + new >=8 chars, bcrypt verify/update, follows handle/readJson conventions) + Settings -> Account -> "Change password" dialog (current/new/confirm, client validation, role=alert errors, disabled-until-filled submit).
+- login.tsx: removed hardcoded demo account chips + "password is classcheck" hint + override params; cn import dropped. Stale demo JWT self-heals: /me returns null -> token cleared -> clean login screen.
+- Verified via curl: login 200 -> change-password 200 -> old password 401 -> new password 200 -> reverted. Browser E2E full loop with throwaway data: login -> onboarding wizard (3 steps, create department) -> clean empty home -> Students "No students yet" -> Settings change-password dialog -> UI password change + "Password updated" toast + API re-verified -> sign out. THEN reset DB back to pristine admin-only state (0 rows + admin, onboarded=false).
+- lint + tsc clean; no 401/500 in dev.log.
+
+Stage Summary:
+- Instance is production-clean: zero demo data, one admin account (admin@classcheck.edu / ChangeMe2026! — user must change it in Settings on first login), demo login chips gone. First login -> onboarding wizard -> user creates real department (PHA) + courses + CSV-imports real students. Demo accounts no longer exist anywhere (DB or UI).
