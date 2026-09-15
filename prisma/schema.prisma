@@ -1,0 +1,111 @@
+// ClassCheck — Prisma schema (SQLite)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String
+  createdAt DateTime @default(now())
+  users     User[]
+  courses   Course[]
+  students  Student[]
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  passwordHash String
+  name         String
+  title        String?
+  role         String      @default("LECTURER") // LECTURER | ADMIN
+  onboarded    Boolean     @default(false)
+  settingsJson String      @default("{}")
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  taughtCourses Course[]   @relation("CourseLecturer")
+  sessions     Session[]   @relation("SessionLecturer")
+  createdAt    DateTime    @default(now())
+}
+
+model Course {
+  id           String       @id @default(cuid())
+  code         String
+  title        String
+  level        Int          @default(200)
+  semester     Int          @default(1)
+  departmentId String
+  department   Department   @relation(fields: [departmentId], references: [id])
+  lecturerId   String
+  lecturer     User         @relation("CourseLecturer", fields: [lecturerId], references: [id])
+  enrollments  Enrollment[]
+  sessions     Session[]
+  createdAt    DateTime     @default(now())
+
+  @@unique([code, departmentId])
+}
+
+model Student {
+  id              String             @id @default(cuid())
+  studentId       String             @unique
+  firstName       String
+  lastName        String
+  level           Int
+  email           String?
+  phone           String?
+  pin             String // 4-digit check-in PIN
+  departmentId    String?
+  department      Department?        @relation(fields: [departmentId], references: [id])
+  descriptorsJson String             @default("[]") // JSON array of 128-d face descriptors
+  faceEnrolledAt  DateTime?
+  consentVersion  String?
+  enrollments     Enrollment[]
+  records         AttendanceRecord[]
+  createdAt       DateTime           @default(now())
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, courseId])
+}
+
+model Session {
+  id         String             @id @default(cuid())
+  courseId   String
+  course     Course             @relation(fields: [courseId], references: [id])
+  lecturerId String
+  lecturer   User               @relation("SessionLecturer", fields: [lecturerId], references: [id])
+  mode       String             @default("WALKTHROUGH") // WALKTHROUGH | KIOSK | MANUAL
+  status     String             @default("OPEN") // OPEN | COMPLETED | CANCELLED
+  startedAt  DateTime           @default(now())
+  endedAt    DateTime?
+  records    AttendanceRecord[]
+}
+
+model AttendanceRecord {
+  id         String   @id @default(cuid())
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id])
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  status     String   @default("PRESENT") // PRESENT | LATE | ABSENT
+  method     String   @default("FACE") // FACE | QR | PIN | MANUAL
+  confidence Float?
+  markedAt   DateTime @default(now())
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+}
