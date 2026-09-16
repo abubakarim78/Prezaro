@@ -1,5 +1,5 @@
 /* Rollmark service worker — offline-first app shell */
-const VERSION = 'rollmark-v4'
+const VERSION = 'rollmark-v6'
 const SHELL_CACHE = `${VERSION}-shell`
 const STATIC_CACHE = `${VERSION}-static`
 

@@ -320,3 +320,21 @@ Stage Summary:
 - Verification is now single-capture: first matching frame checks the student in — no head-turning.
 - Dim lecture halls: camera exposure boost + adaptive gamma enhancement before detection, preview brightened to match.
 - Courses support Semester 1/2 and Trimester 1/2/3; enrollment stores a reference photo shown on the student profile; "3 poses vs 4" counter fixed; back-navigation params fixed.
+
+---
+Task ID: 22
+Agent: Z.ai Code (main)
+Task: PWA auto-update prompt — "New version ready — Restart" toast when a newly deployed service worker activates mid-session (user request: "yes, let's do that" after PWA update behavior was explained).
+
+Work Log:
+- Read src/components/app/rollmark-app.tsx boot effect and public/sw.js (v4, skipWaiting + clients.claim already in place); confirmed sonner Toaster globally mounted in src/app/layout.tsx (closeButton, top-center).
+- Created src/lib/pwa.ts — watchForUpdates(onUpdateReady): registers /sw.js, captures wasControlled at boot (distinguishes first install from genuine update), listens for updatefound → installing worker 'statechange' → 'activated' to fire the prompt once per page session; plus visibilitychange → reg.update() re-check throttled to 10 min so a lecturer keeping the app open all class still gets prompted.
+- Wired into rollmark-app.tsx boot effect: toast('New version ready', { description, icon: RefreshCw (military green), action: Restart → window.location.reload(), duration: Infinity }); cleanup via unwatchUpdates().
+- Bumped public/sw.js VERSION rollmark-v4 → v5, then v6 during E2E (file left at rollmark-v6 = deployed version; existing v4 installs get the prompt on next launch).
+- E2E (agent-browser): normal load → no toast (wasControlled guard correct); mid-session deploy v6 + reg.update() → "New version ready" toast appeared; clicked Restart → reload, toast dismissed, app re-rendered clean, SW activated, no installing/waiting workers; browser console/errors clean; dev.log clean; bun run lint clean.
+- Note: first E2E attempt missed the toast because localhost-speed install+activation (skipWaiting) completed before boot listeners attached — localhost-only race; real deployments download ~6MB face models on install so listeners always win. Deterministic test (update deployed while page open) validates the mechanism.
+
+Stage Summary:
+- Installed PWA clients now get a persistent one-tap "New version ready — Restart" prompt the moment a new deployment activates, instead of silently updating on next launch.
+- New artifact: src/lib/pwa.ts; modified: src/components/app/rollmark-app.tsx, public/sw.js (VERSION = 'rollmark-v6').
+- Task ID: 21 (Trimester 1/2/3, photo-count off-by-one, post-enroll "no student found", low-light capture, one-face-one-student dedup, single-frame verification) remains PENDING — untouched in this task.

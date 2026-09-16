@@ -7,8 +7,9 @@ import { api, getErrorMessage, clearAuthToken, setUnauthorizedHandler } from '@/
 import { flushQueue, pendingCount } from '@/lib/offline'
 import { OfflineError } from '@/lib/api'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
+import { watchForUpdates } from '@/lib/pwa'
 
 import LoginView from '@/components/app/views/login'
 import OnboardingView from '@/components/app/views/onboarding'
@@ -53,9 +54,16 @@ function RollmarkInner() {
   useEffect(() => {
     let alive = true
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
-    }
+    // PWA updates: when a newly deployed service worker activates, prompt
+    // the user to restart so they are running the latest version immediately.
+    const unwatchUpdates = watchForUpdates(() => {
+      toast('New version ready', {
+        description: 'Restart to pick up the latest improvements.',
+        icon: <RefreshCw className="h-4 w-4 text-primary" />,
+        action: { label: 'Restart', onClick: () => window.location.reload() },
+        duration: Infinity,
+      })
+    })
 
     const updateOnline = () => {
       const online = navigator.onLine
@@ -112,6 +120,7 @@ function RollmarkInner() {
 
     return () => {
       alive = false
+      unwatchUpdates()
       window.removeEventListener('online', updateOnline)
       window.removeEventListener('offline', updateOnline)
       setUnauthorizedHandler(null)
