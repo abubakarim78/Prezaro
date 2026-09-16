@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { api, ApiError, getErrorMessage, setAuthToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
-import { EyeMark } from '@/components/brand/eye-mark'
+import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -106,7 +106,7 @@ export default function LoginView() {
         {/* Glyph + wordmark */}
         <div className="flex flex-col items-center text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-            <EyeMark className="h-9 w-9" />
+            <FaceScanMark className="h-9 w-9" />
           </div>
           <h1 className="mt-4 text-2xl font-bold tracking-tight">Rollmark</h1>
           <p className="mt-1 text-sm text-muted-foreground">

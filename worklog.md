@@ -256,3 +256,20 @@ Work Log:
 
 Stage Summary:
 - App is now "Rollmark" in army green everywhere users look: auth screens with a self-blinking eye logo, dashboard/sidebar/mobile chrome, PWA name+icons+theme colors, notification emails, CSV exports, and the deploy kit. Login is admin@rollmark.edu / ChangeMe2026! (bootstrap envs unchanged for fresh installs). The eye blinks on the sign-in/sign-up page (CSS-only, reduced-motion safe).
+
+---
+Task ID: 19
+Agent: Z.ai (orchestrator)
+Task: User preferred the previous Face-ID-scan logo — restore it as the brand glyph and animate the eyes inside it to blink (instead of the standalone eye mark from Task 18).
+
+Work Log:
+- Created src/components/brand/face-scan-mark.tsx: reproduces the lucide ScanFace geometry (4 corner brackets + smile, stroke-width 2, round caps/joins) but with the two dot-eyes replaced by short vertical stadium eyes (M9 7.9v2.2 / M15 7.9v2.2) so the blink is visible.
+- Eyes blink via CSS: each eye wrapped in a <g className="rm-scan-eye"> with animation rm-eye-blink 4.2s + transform-box: fill-box; transform-origin: center (per-eye squash toward its own centre: scaleY 1 → 0.06 → 1). Brackets + smile stay static. Removed the old rm-eye-look keyframes and .rm-eye-blink/.rm-eye-look classes; prefers-reduced-motion disables the blink.
+- Swapped all 5 brand spots from EyeMark → FaceScanMark (login hero, desktop sidebar header, mobile top bar, onboarding header, boot screen) and deleted eye-mark.tsx. rg confirms zero stale references.
+- Regenerated all PWA assets with the face-scan glyph (army-green gradient + white mark): icon-192/512, maskable-192/512, apple-touch-icon, icon-master, src/app/icon.png + apple-icon.png; public/logo.svg updated to the static face-scan mark.
+- Dev-server note: Turbopack served a STALE compiled CSS chunk (same [root-of-the-server]__0f0ba101 hash) after globals.css edits — restart was not enough this time; had to rm -rf .next and restart for the new CSS to compile. Recorded for future CSS-edit verification.
+- Browser E2E: element.getAnimations() shows 2 × rm-eye-blink running on the login page; froze both eyes at currentTime=3822ms (91% of 4.2s cycle) vs 1000ms (open) and zoomed the glyph 160px — open frame = vertical oval eyes, closed frame = flat lid dashes; brackets/smile unmoved. Onboarding header verified with 2 running eye animations after admin login. Session cleared (cookies + localStorage) and DB left pristine: single admin, onboarded=false, zero EmailLog rows.
+- eslint + tsc clean; dev.log healthy.
+
+Stage Summary:
+- Brand glyph is once again the Face ID scan mark the user liked — now alive: its eyes blink every ~4.2s on the sign-in/sign-up page, sidebar, mobile top bar, onboarding and boot screen. Army green palette and the Rollmark name from Task 18 are unchanged; icons/favicons now match the new glyph.

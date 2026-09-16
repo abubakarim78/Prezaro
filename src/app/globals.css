@@ -163,8 +163,8 @@
   }
 }
 
-/* ---- Rollmark brand eye ------------------------------------ */
-/* The glyph blinks on its own and glances around the room.      */
+/* ---- Rollmark brand glyph ----------------------------------- */
+/* Face ID mark: the eyes blink on their own.                     */
 @keyframes rm-eye-blink {
   0%,
   88%,
@@ -172,43 +172,19 @@
     transform: scaleY(1);
   }
   91% {
-    transform: scaleY(0.05);
+    transform: scaleY(0.06);
   }
   94.5% {
     transform: scaleY(1);
   }
 }
-@keyframes rm-eye-look {
-  0%,
-  18% {
-    transform: translate(0, 0);
-  }
-  28%,
-  43% {
-    transform: translate(1.1px, 0.35px);
-  }
-  53%,
-  68% {
-    transform: translate(-1px, -0.25px);
-  }
-  78%,
-  92% {
-    transform: translate(0.35px, 0.45px);
-  }
-  100% {
-    transform: translate(0, 0);
-  }
-}
-.rm-eye-blink {
-  animation: rm-eye-blink 4.6s ease-in-out infinite;
-  transform-origin: 12px 12px;
-}
-.rm-eye-look {
-  animation: rm-eye-look 7.3s ease-in-out infinite;
+.rm-scan-eye {
+  animation: rm-eye-blink 4.2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rm-eye-blink,
-  .rm-eye-look {
+  .rm-scan-eye {
     animation: none;
   }
 }

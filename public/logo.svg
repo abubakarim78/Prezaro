@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Rollmark brand glyph — the eye that marks the roll -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="M2 12C4.9 7 8.6 4.7 12 4.7s7.1 2.3 10 7.3c-2.9 5-6.6 7.3-10 7.3S4.9 17 2 12Z"
-        stroke="#567031" stroke-width="1.7" stroke-linejoin="round"/>
-  <path fill-rule="evenodd" clip-rule="evenodd"
-        d="M12 7.8a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 2.3a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8Z"
-        fill="#567031"/>
-  <circle cx="12.85" cy="11.1" r="0.62" fill="#567031"/>
+<!-- Rollmark brand glyph — Face ID scan with a friendly face -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+     stroke="#567031" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+  <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+  <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+  <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+  <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+  <path d="M9 7.9v2.2"/>
+  <path d="M15 7.9v2.2"/>
 </svg>

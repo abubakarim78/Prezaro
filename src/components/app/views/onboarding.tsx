@@ -17,7 +17,7 @@ import { toast } from 'sonner'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type { Course, CoursesResponse, DepartmentsResponse, User } from '@/lib/types'
-import { EyeMark } from '@/components/brand/eye-mark'
+import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -228,7 +228,7 @@ export default function OnboardingView() {
         {/* Header */}
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <EyeMark className="h-5 w-5" />
+            <FaceScanMark className="h-5 w-5" />
           </div>
           <div className="leading-tight">
             <p className="font-semibold tracking-tight">Rollmark</p>
