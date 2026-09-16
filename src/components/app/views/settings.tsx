@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useTheme } from 'next-themes'
+import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
   Building2,
@@ -10,17 +11,28 @@ import {
   Eye,
   Footprints,
   KeyRound,
+  Loader2,
+  Mail,
   Monitor,
   MonitorSmartphone,
   Moon,
   Package,
   Pencil,
+  RefreshCw,
+  Send,
   ShieldCheck,
   Smartphone,
   Sun,
   UserRound,
 } from 'lucide-react'
-import type { AppSettings, LoginResponse, SettingsResponse } from '@/lib/types'
+import type {
+  AppSettings,
+  EmailLogItem,
+  EmailsResponse,
+  LoginResponse,
+  SettingsResponse,
+  TestEmailResponse,
+} from '@/lib/types'
 import { api, getErrorMessage, clearAuthToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -91,6 +103,20 @@ const PRIVACY_POINTS = [
   'Lecturers can delete any student’s face template from their profile in one tap.',
   'Face templates never leave your department’s devices and servers.',
 ]
+
+const EMAIL_TYPE_LABEL: Record<string, string> = {
+  WELCOME: 'Welcome',
+  ACCOUNT_ALERT: 'Account alert',
+  STUDENT_REGISTERED: 'Student registered',
+  COURSE_ENROLLMENT: 'Course enrollment',
+  TEST: 'Test',
+}
+
+const EMAIL_STATUS_STYLE: Record<string, string> = {
+  SENT: 'border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
+  SIMULATED: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  FAILED: 'border-destructive/30 bg-destructive/10 text-destructive',
+}
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -259,6 +285,47 @@ export default function SettingsView() {
       setPwError(getErrorMessage(e))
     } finally {
       setPwSaving(false)
+    }
+  }
+
+  // ---- Email notifications (admin) -----------------------------
+  const [emailsLoaded, setEmailsLoaded] = useState(false)
+  const [emailsError, setEmailsError] = useState<string | null>(null)
+  const [emailConfig, setEmailConfig] = useState<EmailsResponse['config'] | null>(null)
+  const [emailLog, setEmailLog] = useState<EmailLogItem[]>([])
+  const [emailPreview, setEmailPreview] = useState<EmailLogItem | null>(null)
+  const [testSending, setTestSending] = useState(false)
+
+  const loadEmails = useCallback(async () => {
+    setEmailsError(null)
+    try {
+      const d = await api<EmailsResponse>('/api/emails')
+      setEmailConfig(d.config)
+      setEmailLog(d.emails)
+      setEmailsLoaded(true)
+    } catch (e) {
+      setEmailsError(getErrorMessage(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (user?.role !== 'ADMIN') return
+    void loadEmails()
+  }, [user?.role, loadEmails])
+
+  const sendTest = async () => {
+    if (testSending) return
+    setTestSending(true)
+    try {
+      const d = await api<TestEmailResponse>('/api/emails/test', { method: 'POST' })
+      if (d.status === 'SENT') toast.success('Test email delivered to your inbox')
+      else if (d.status === 'SIMULATED') toast.info('Recorded in the outbox — configure SMTP to deliver for real')
+      else toast.error('Delivery failed — open the entry below for details')
+      await loadEmails()
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setTestSending(false)
     }
   }
 
@@ -531,6 +598,119 @@ export default function SettingsView() {
           </ul>
         </section>
 
+        {/* ---------- Email notifications (admin) ---------- */}
+        {user.role === 'ADMIN' && (
+          <section className="rounded-2xl border bg-card p-4 sm:p-6" aria-label="Email notifications">
+            <div className="flex items-center gap-2">
+              <Mail className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold tracking-tight">Email notifications</h2>
+            </div>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Welcome and registration alerts, sent from your instance.
+            </p>
+
+            <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border bg-background p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Delivery mode</p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {emailConfig?.smtpConfigured
+                    ? `SMTP · ${emailConfig.host}${emailConfig.from ? ` · from ${emailConfig.from}` : ''}`
+                    : 'Set SMTP_HOST, SMTP_PORT, SMTP_USER & SMTP_PASS to deliver for real.'}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide',
+                  emailConfig?.smtpConfigured
+                    ? EMAIL_STATUS_STYLE.SENT
+                    : EMAIL_STATUS_STYLE.SIMULATED,
+                )}
+              >
+                {emailConfig?.smtpConfigured ? 'LIVE' : 'SIMULATED'}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11"
+                disabled={testSending}
+                onClick={() => void sendTest()}
+              >
+                {testSending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+                Send test email
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="min-h-11"
+                onClick={() => void loadEmails()}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh
+              </Button>
+            </div>
+
+            <Separator className="my-4" />
+            <p className="text-sm font-medium">Delivery log</p>
+            {!emailsLoaded && !emailsError ? (
+              <LoadingBlock label="Loading emails…" />
+            ) : emailsError ? (
+              <div className="mt-2">
+                <p className="text-sm text-destructive">{emailsError}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 min-h-11"
+                  onClick={() => void loadEmails()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : emailLog.length === 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                No emails yet — they appear here as accounts and students are registered.
+              </p>
+            ) : (
+              <div className="mt-2 max-h-96 space-y-2 overflow-y-auto pr-1 scrollbar-thin">
+                {emailLog.map((mail) => (
+                  <button
+                    key={mail.id}
+                    type="button"
+                    onClick={() => setEmailPreview(mail)}
+                    className="w-full rounded-xl border bg-background p-3 text-left transition-colors hover:bg-accent/50"
+                    aria-label={`Open email: ${mail.subject}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                        {EMAIL_TYPE_LABEL[mail.type] ?? mail.type}
+                      </span>
+                      <span
+                        className={cn(
+                          'rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide',
+                          EMAIL_STATUS_STYLE[mail.status] ?? '',
+                        )}
+                      >
+                        {mail.status}
+                      </span>
+                      <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                        {format(new Date(mail.createdAt), 'MMM d · HH:mm')}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 truncate text-sm font-medium">{mail.subject}</p>
+                    <p className="truncate text-xs text-muted-foreground">To {mail.to}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* ---------- Account ---------- */}
         <section className="rounded-2xl border bg-card p-4 sm:p-6" aria-label="Account">
           <Button
@@ -673,6 +853,25 @@ export default function SettingsView() {
               {pwSaving ? 'Updating…' : 'Update password'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ---------- Email preview dialog ---------- */}
+      <Dialog open={emailPreview !== null} onOpenChange={(open) => !open && setEmailPreview(null)}>
+        <DialogContent className="max-w-md rounded-2xl p-0">
+          <DialogHeader className="space-y-1 border-b px-5 py-4">
+            <DialogTitle className="text-base">{emailPreview?.subject}</DialogTitle>
+            <DialogDescription className="truncate">
+              To {emailPreview?.to} · {emailPreview ? format(new Date(emailPreview.createdAt), 'MMM d, yyyy HH:mm') : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {emailPreview && (
+            <iframe
+              title="Email preview"
+              srcDoc={emailPreview.bodyHtml}
+              sandbox=""
+              className="h-[380px] w-full rounded-b-2xl border-0 bg-white"
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { BadRequestError, requireUser } from '@/lib/auth'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
+import { queueEmail, studentRegisteredHtml } from '@/lib/email'
 import {
   handle,
   readJson,
@@ -187,6 +188,34 @@ export async function POST(req: Request) {
       include: studentWithCoursesInclude,
       orderBy: { studentId: 'asc' },
     })
+
+    // Registration notifications — fire-and-forget, students with an
+    // email address get a confirmation that they are on the register.
+    if (created.length > 0) {
+      const departmentName = user.departmentId
+        ? (
+            await db.department.findUnique({
+              where: { id: user.departmentId },
+              select: { name: true },
+            })
+          )?.name ?? 'your department'
+        : 'your department'
+      for (const student of created) {
+        if (!student.email) continue
+        queueEmail({
+          to: student.email,
+          subject: `You've been registered for ${departmentName} attendance`,
+          html: studentRegisteredHtml(
+            `${student.firstName} ${student.lastName}`,
+            student.studentId,
+            departmentName,
+          ),
+          type: 'STUDENT_REGISTERED',
+          meta: { studentRowId: student.id, studentIndex: student.studentId },
+        })
+      }
+    }
+
     return NextResponse.json({
       students: created.map(studentListItem),
       created: toCreate.length,

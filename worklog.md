@@ -194,3 +194,48 @@ Work Log:
 
 Stage Summary:
 - Instance is production-clean: zero demo data, one admin account (admin@classcheck.edu / ChangeMe2026! — user must change it in Settings on first login), demo login chips gone. First login -> onboarding wizard -> user creates real department (PHA) + courses + CSV-imports real students. Demo accounts no longer exist anywhere (DB or UI).
+
+---
+Task ID: 15
+Agent: Z.ai (orchestrator)
+Task: Modern color re-branding — emerald → violet design system.
+
+Work Log:
+- Rewrote all design tokens in src/app/globals.css from the emerald/green system to a modern violet system (oklch, hue ~293): primary oklch(0.54 0.23 293) light / oklch(0.7 0.17 295) dark, violet-tinted background/card/muted/accent/border/ring/sidebar tokens, new chart palette (violet, fuchsia, amber, teal, rose), scrollbar hue updated. Both light and dark themes.
+- Hardcoded brand color sweep: audited all 26 emerald/teal/green occurrences in src — almost all are SEMANTIC success states (present/enrolled/checked-in badges, P override, attendance rings, status pills) and were deliberately KEPT green for meaning; only brand usages changed: home.tsx open-session banner gradient emerald-500/10 → violet-500/10. login.tsx radial washes rewritten with violet rgba(124,58,237,…)/rgba(139,92,246,…) as part of the Task 17 rewrite.
+- Verified visually in browser: login screen, home dashboard (desktop), settings, onboarding wizard — light AND dark mode, desktop AND 390px mobile. Violet applies everywhere via tokens (hero card, FAB, sliders, focus rings, charts, sidebar).
+
+Stage Summary:
+- ClassCheck now has a modern violet brand; semantic success/warning/danger colors untouched so attendance meaning stays unambiguous. Rebrand is 100% token-driven + 2 hardcoded spots fixed.
+
+---
+Task ID: 16
+Agent: Z.ai (orchestrator)
+Task: Email notification system for registrations (outbox pattern + real SMTP support).
+
+Work Log:
+- Installed nodemailer (+types). Added EmailLog model to prisma/schema.prisma (to, subject, bodyHtml, type, status SENT|SIMULATED|FAILED, error, metaJson, createdAt index) and ran db:push. Required dev-server restart after push (stale generated client → db.emailLog undefined, same known issue as Task 10).
+- Wrote src/lib/email.ts (server-only): smtpStatus() reads SMTP_HOST/PORT/USER/PASS/FROM env; sendAppEmail() delivers via nodemailer when SMTP_HOST is set (8s timeouts, cached transport) and ALWAYS persists to EmailLog (SENT/FAILED with error); with no SMTP it stores the rendered email as SIMULATED — nothing throws into request paths. queueEmail() fire-and-forget variant for sign-up/import/enroll flows. Branded table-based HTML templates (violet header, escapeHtml'd): welcomeEmailHtml, newAccountAlertHtml, studentRegisteredHtml, courseEnrollmentHtml, testEmailHtml.
+- New routes: POST /api/auth/register (see Task 17) fires WELCOME to the new user + ACCOUNT_ALERT to all admins (max 5); POST /api/students sends STUDENT_REGISTERED to each created student that has an email (dept name resolved); POST /api/courses/:id/students sends COURSE_ENROLLMENT for newly enrolled students with email. GET /api/emails (ADMIN-only) returns smtpConfig status + last 100 logs; POST /api/emails/test (ADMIN-only) sends a test email to the admin and returns status.
+- Fixed contract mismatch found in testing: /api/emails config field renamed to smtpConfigured to match types.ts.
+- Settings → new "Email notifications" section (ADMIN-only): delivery-mode card (LIVE vs SIMULATED pill + env hint), Send test email + Refresh buttons, Delivery log (max-h-96 scroll, type badge + status pill + time), row click opens a Dialog preview rendering the email HTML in a sandboxed iframe.
+- deploy/docker-compose.yml now documents SMTP_HOST/PORT/USER/PASS/FROM env passthrough.
+- API E2E: registered kofi.test@test.edu → WELCOME + ACCOUNT_ALERT logged; created dept/course/student-with-email/enrollment → STUDENT_REGISTERED + COURSE_ENROLLMENT logged (all SIMULATED, 4/4 types correct); duplicate email → 409; invalid payload → 400. UI E2E: admin saw all entries, Send test email added TEST entry, preview dialog renders branded email; mobile dark verified. Test data cleaned afterwards (EmailLog emptied).
+
+Stage Summary:
+- Registration-triggered emails cover every path: account sign-up (welcome + admin alert), student registered into the department, student enrolled in a course. Zero-SMTP instances keep a fully inspectable outbox in Settings; production instances just set SMTP_* env vars (compose file documents them) and email sends for real.
+
+---
+Task ID: 17
+Agent: Z.ai (orchestrator)
+Task: Sign-up page (app previously had no self-registration).
+
+Work Log:
+- New POST /api/auth/register route: zod {name≥2, email lowercase+format, password≥8}; 409 on duplicate email (pre-check + P2002 catch); first account on an empty users table becomes ADMIN (matches deploy bootstrap rule), everyone after signs up as LECTURER; bcrypt(10) hash; returns {user, token} + sets cc_token cookie (same dual-mode auth as login); fires Task 16 emails.
+- login.tsx rewritten as a dual-mode auth card: animated Sign in / Create account switch (AnimatePresence slide, single route — app stays one-view PWA per project constraint); sign-up has Full name + Email + Password (min 8, inline role=alert errors for short password/empty fields, 400/401/409 API messages shown inline, others toasted); success → setAuthToken + setUser → onboarded ? home : onboarding; toggle link at card bottom.
+- Browser E2E: create-account mode renders, "short" password blocked with inline error, valid sign-up ("Zara Browser") created account, auto-signed-in, landed on onboarding wizard; duplicate signup via curl → 409 message. Verified the new user got LECTURER + welcome email.
+- All test artifacts removed after E2E: 3 test users deleted, dept/course/student/enrollment wiped, EmailLog emptied, admin reset to pristine Task-14 state (admin@classcheck.edu, onboarded=false, no department). Final DB: 0 rows everywhere except the one admin.
+- lint + tsc clean (only pre-existing examples/skills errors); dev.log free of real 401/500; login screen verified as the final user-facing state.
+
+Stage Summary:
+- ClassCheck now has complete self-service onboarding: anyone can create a lecturer account from the login screen (first account on a fresh instance = ADMIN), gets a welcome email, and walks the setup wizard. Combined with Tasks 15/16 the app is production-ready: violet rebrand, registration emails, clean database, deploy kit with SMTP env support.

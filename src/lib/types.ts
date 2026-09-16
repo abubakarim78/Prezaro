@@ -189,3 +189,35 @@ export interface DepartmentsResponse {
 export interface SettingsResponse {
   settings: AppSettings
 }
+
+// ---- Email notifications -------------------------------------
+
+export type EmailLogStatus = 'SENT' | 'SIMULATED' | 'FAILED'
+
+export type EmailLogType =
+  | 'WELCOME'
+  | 'ACCOUNT_ALERT'
+  | 'STUDENT_REGISTERED'
+  | 'COURSE_ENROLLMENT'
+  | 'TEST'
+
+export interface EmailLogItem {
+  id: string
+  to: string
+  subject: string
+  type: EmailLogType
+  status: EmailLogStatus
+  error?: string | null
+  createdAt: string
+  bodyHtml: string
+}
+
+export interface EmailsResponse {
+  config: { smtpConfigured: boolean; host: string | null; from: string | null }
+  emails: EmailLogItem[]
+}
+
+export interface TestEmailResponse {
+  ok: boolean
+  status: EmailLogStatus
+}

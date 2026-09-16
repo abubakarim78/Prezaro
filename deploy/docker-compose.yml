@@ -19,6 +19,14 @@ services:
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
       BOOTSTRAP_NAME: ${BOOTSTRAP_NAME:-}
       BOOTSTRAP_DEPARTMENT: ${BOOTSTRAP_DEPARTMENT:-}
+      # Email notifications (welcome / registration alerts). Without SMTP_HOST
+      # emails are recorded in the app outbox (Settings → Email notifications).
+      # Example (Gmail: SMTP_HOST=smtp.gmail.com SMTP_PORT=587 + app password):
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - classcheck-db:/app/db
     healthcheck:

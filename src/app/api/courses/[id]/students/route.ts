@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { BadRequestError, NotFoundError, requireUser } from '@/lib/auth'
+import { queueEmail, courseEnrollmentHtml } from '@/lib/email'
 import {
   handle,
   readJson,
@@ -64,6 +65,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       await db.enrollment.createMany({
         data: toAdd.map((c) => ({ courseId: course.id, studentId: c.id })),
       })
+      // Course-registration notifications — only students with an email.
+      const enrolled = await db.student.findMany({
+        where: { id: { in: toAdd.map((c) => c.id) }, email: { not: null } },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          studentId: true,
+        },
+      })
+      for (const student of enrolled) {
+        if (!student.email) continue
+        queueEmail({
+          to: student.email,
+          subject: `You've been enrolled in ${course.code}`,
+          html: courseEnrollmentHtml(
+            `${student.firstName} ${student.lastName}`,
+            student.studentId,
+            course.code,
+            course.title,
+            user.name,
+          ),
+          type: 'COURSE_ENROLLMENT',
+          meta: { courseId: course.id, studentRowId: student.id },
+        })
+      }
     }
     return NextResponse.json({ enrolled: toAdd.length })
   })
