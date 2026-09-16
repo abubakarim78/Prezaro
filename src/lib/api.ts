@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — API client (fetch wrapper)
+// Rollmark — API client (fetch wrapper)
 //
 // Auth strategy (dual-mode):
 //   • Bearer token in localStorage — works everywhere, including

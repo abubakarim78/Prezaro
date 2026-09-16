@@ -8,6 +8,7 @@ import { flushQueue, pendingCount } from '@/lib/offline'
 import { OfflineError } from '@/lib/api'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
+import { EyeMark } from '@/components/brand/eye-mark'
 
 import LoginView from '@/components/app/views/login'
 import OnboardingView from '@/components/app/views/onboarding'
@@ -27,15 +28,15 @@ import { AppShell } from '@/components/app/shell'
 /** Views rendered full-screen without the nav shell */
 const IMMERSIVE_VIEWS = new Set(['login', 'onboarding', 'scan', 'enroll', 'review'])
 
-export default function ClassCheckApp() {
+export default function RollmarkApp() {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <ClassCheckInner />
+      <RollmarkInner />
     </ThemeProvider>
   )
 }
 
-function ClassCheckInner() {
+function RollmarkInner() {
   const {
     booted,
     user,
@@ -121,9 +122,10 @@ function ClassCheckInner() {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-background">
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-          <Loader2 className="h-7 w-7 animate-spin" />
+          <EyeMark className="h-8 w-8" />
         </div>
-        <p className="text-sm text-muted-foreground font-medium">ClassCheck</p>
+        <p className="text-sm text-muted-foreground font-medium">Rollmark</p>
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" />
       </div>
     )
   }

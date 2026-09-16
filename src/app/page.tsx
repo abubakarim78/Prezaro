@@ -1,5 +1,5 @@
-import ClassCheckApp from '@/components/app/class-check-app'
+import RollmarkApp from '@/components/app/rollmark-app'
 
 export default function Page() {
-  return <ClassCheckApp />
+  return <RollmarkApp />
 }

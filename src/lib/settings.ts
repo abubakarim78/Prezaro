@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — per-user app settings (stored as JSON on User)
+// Rollmark — per-user app settings (stored as JSON on User)
 // Defaults: { atRiskThreshold: 75, liveness: true, defaultMode: 'WALKTHROUGH' }
 // ============================================================
 import { db } from '@/lib/db'

@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { EyeMark } from '@/components/brand/eye-mark'
 import { api, clearAuthToken } from '@/lib/api'
 import { pendingCount } from '@/lib/offline'
 import { toast } from 'sonner'
@@ -110,10 +111,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="hidden lg:flex w-64 flex-col border-r bg-sidebar sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-5 h-16 border-b">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <ScanFace className="h-5 w-5" />
+            <EyeMark className="h-5 w-5" />
           </div>
           <div className="leading-tight">
-            <p className="font-semibold tracking-tight">ClassCheck</p>
+            <p className="font-semibold tracking-tight">Rollmark</p>
             <p className="text-[11px] text-muted-foreground">Face attendance</p>
           </div>
         </div>
@@ -207,10 +208,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="lg:hidden sticky top-0 z-30 bg-background/85 backdrop-blur border-b pt-safe">
           <div className="h-14 flex items-center gap-3 px-4">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <ScanFace className="h-4 w-4" />
+              <EyeMark className="h-[18px] w-[18px]" />
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <p className="font-semibold tracking-tight text-sm">ClassCheck</p>
+              <p className="font-semibold tracking-tight text-sm">Rollmark</p>
               <p className="text-[10px] text-muted-foreground truncate">
                 {user.departmentName ?? 'Set up your department'}
               </p>

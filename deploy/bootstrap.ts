@@ -1,4 +1,4 @@
-// ClassCheck — one-time admin bootstrap for a fresh production database.
+// Rollmark — one-time admin bootstrap for a fresh production database.
 // Runs on every container start; creates the first ADMIN user only when the
 // users table is empty and BOOTSTRAP_EMAIL/BOOTSTRAP_PASSWORD are provided.
 //

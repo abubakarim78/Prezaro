@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — Offline-first sync queue
+// Rollmark — Offline-first sync queue
 // Attendance records created while offline are queued in
 // localStorage and flushed to /api/sessions/:id/sync when
 // connectivity returns.
@@ -8,7 +8,7 @@
 import { api } from './api'
 import type { AttendanceRecord, AttendanceStatus } from './types'
 
-const KEY = 'classcheck.pending.v1'
+const KEY = 'rollmark.pending.v1'
 
 export interface PendingRecord {
   sessionId: string
@@ -100,7 +100,7 @@ export async function flushQueue(): Promise<number> {
 }
 
 /** Local roster cache so face scanning works offline. */
-const ROSTER_KEY = 'classcheck.roster.v1'
+const ROSTER_KEY = 'rollmark.roster.v1'
 
 export interface CachedRoster {
   savedAt: string

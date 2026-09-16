@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState, StatCard, StatusPill } from '@/components/app/shared'
 import { cn } from '@/lib/utils'
 
-const INSTALL_DISMISS_KEY = 'classcheck.installDismissed.v1'
+const INSTALL_DISMISS_KEY = 'rollmark.installDismissed.v1'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -146,7 +146,7 @@ export default function HomeView() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
-              className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-primary/10 to-violet-500/10 p-4"
+              className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-primary/10 to-primary/10 p-4"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400">
                 <ScanFace className="h-5 w-5" />
@@ -312,7 +312,7 @@ export default function HomeView() {
                 <Download className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1 leading-tight">
-                <p className="text-sm font-semibold">Install ClassCheck on your phone</p>
+                <p className="text-sm font-semibold">Install Rollmark on your phone</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Works offline, opens full-screen, no app store needed.
                 </p>

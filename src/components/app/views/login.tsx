@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Eye, EyeOff, Loader2, ScanFace } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, getErrorMessage, setAuthToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
+import { EyeMark } from '@/components/brand/eye-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -92,8 +93,8 @@ export default function LoginView() {
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-4 py-10">
       {/* Decorative brand wash */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(124,58,237,0.14),transparent_65%)] dark:bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(139,92,246,0.16),transparent_65%)]" />
-        <div className="absolute inset-x-0 bottom-0 h-72 bg-[radial-gradient(70%_100%_at_50%_110%,rgba(124,58,237,0.09),transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(86,112,49,0.15),transparent_65%)] dark:bg-[radial-gradient(90%_60%_at_50%_-10%,rgba(148,181,99,0.16),transparent_65%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-72 bg-[radial-gradient(70%_100%_at_50%_110%,rgba(86,112,49,0.1),transparent_70%)]" />
       </div>
 
       <motion.div
@@ -105,9 +106,9 @@ export default function LoginView() {
         {/* Glyph + wordmark */}
         <div className="flex flex-col items-center text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-            <ScanFace className="h-8 w-8" />
+            <EyeMark className="h-9 w-9" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">ClassCheck</h1>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight">Rollmark</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Face attendance for lecture halls
           </p>
@@ -243,7 +244,7 @@ export default function LoginView() {
               </span>
             ) : (
               <span className="text-muted-foreground">
-                New to ClassCheck?{' '}
+                New to Rollmark?{' '}
                 <button
                   type="button"
                   onClick={() => switchMode('signup')}

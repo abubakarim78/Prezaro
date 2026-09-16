@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — attendance record ingestion (sync + finalize)
+// Rollmark — attendance record ingestion (sync + finalize)
 // Upsert by (sessionId, studentId); ignores students not enrolled
 // in the course; the record with the latest markedAt wins.
 // ============================================================

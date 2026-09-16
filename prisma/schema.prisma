@@ -1,4 +1,4 @@
-// ClassCheck — Prisma schema (SQLite)
+// Rollmark — Prisma schema (SQLite)
 
 generator client {
   provider = "prisma-client-js"

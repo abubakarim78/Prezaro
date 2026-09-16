@@ -1,14 +1,14 @@
 {
-  "name": "ClassCheck — Face Attendance",
-  "short_name": "ClassCheck",
+  "name": "Rollmark — Face Attendance",
+  "short_name": "Rollmark",
   "description": "Face-recognition attendance for lecture halls. Enroll students, scan the room, get trusted attendance data in under two minutes.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f7faf8",
-  "theme_color": "#059669",
+  "background_color": "#fafcf8",
+  "theme_color": "#567031",
   "categories": ["education", "productivity"],
   "icons": [
     {

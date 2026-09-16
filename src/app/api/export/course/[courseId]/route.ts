@@ -69,7 +69,7 @@ export async function GET(
       .sort((a, b) => a.name.localeCompare(b.name))
     lines.push(...rows.map((r) => r.line))
 
-    const filename = `classcheck-${course.code}-attendance-summary-${format(new Date(), 'yyyy-MM-dd')}.csv`
+    const filename = `rollmark-${course.code}-attendance-summary-${format(new Date(), 'yyyy-MM-dd')}.csv`
     return csvResponse(filename, lines)
   })
 }

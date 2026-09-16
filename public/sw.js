@@ -1,5 +1,5 @@
-/* ClassCheck service worker — offline-first app shell */
-const VERSION = 'classcheck-v3'
+/* Rollmark service worker — offline-first app shell */
+const VERSION = 'rollmark-v4'
 const SHELL_CACHE = `${VERSION}-shell`
 const STATIC_CACHE = `${VERSION}-static`
 

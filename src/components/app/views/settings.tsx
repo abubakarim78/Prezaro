@@ -572,7 +572,7 @@ export default function SettingsView() {
 
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Package className="h-3.5 w-3.5" />
-            ClassCheck v1.0 · PWA
+            Rollmark v1.0 · PWA
           </p>
         </section>
 
@@ -583,7 +583,7 @@ export default function SettingsView() {
             <h2 className="text-sm font-semibold tracking-tight">Data &amp; privacy</h2>
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Face data deserves care. Here is exactly what ClassCheck does with it:
+            Face data deserves care. Here is exactly what Rollmark does with it:
           </p>
           <ul className="mt-3 space-y-2.5">
             {PRIVACY_POINTS.map((point) => (
@@ -744,7 +744,7 @@ export default function SettingsView() {
           <DialogHeader>
             <DialogTitle>Edit profile</DialogTitle>
             <DialogDescription>
-              Update how your name appears across ClassCheck.
+              Update how your name appears across Rollmark.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

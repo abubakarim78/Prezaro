@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — server-only email notifications (outbox pattern)
+// Rollmark — server-only email notifications (outbox pattern)
 //
 // Delivery modes:
 //  - SMTP configured (SMTP_HOST env) → real delivery via nodemailer,
@@ -80,7 +80,7 @@ export async function sendAppEmail(email: OutgoingEmail): Promise<
   if (status.configured) {
     try {
       await getTransport().sendMail({
-        from: status.from ?? 'ClassCheck <no-reply@classcheck.app>',
+        from: status.from ?? 'Rollmark <no-reply@rollmark.app>',
         to: email.to,
         subject: email.subject,
         html: email.html,
@@ -126,13 +126,13 @@ export function queueEmail(email: OutgoingEmail): void {
 // Table-based markup renders reliably across email clients.
 
 const BRAND = {
-  name: 'ClassCheck',
-  color: '#7c3aed',
-  colorDark: '#5b21b6',
-  wash: '#f4f0fd',
-  text: '#221c35',
-  muted: '#6d6880',
-  border: '#e7e3f2',
+  name: 'Rollmark',
+  color: '#567031',
+  colorDark: '#43571f',
+  wash: '#eef3e6',
+  text: '#1d2417',
+  muted: '#6b7263',
+  border: '#e2e8d8',
 }
 
 function layout(title: string, bodyRows: string, footerNote?: string): string {
@@ -140,13 +140,13 @@ function layout(title: string, bodyRows: string, footerNote?: string): string {
     ? `<tr><td style="padding:18px 28px 8px;font:12px/1.5 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${BRAND.muted};">${footerNote}</td></tr>`
     : ''
   return `<!doctype html>
-<html><body style="margin:0;padding:0;background:#faf9fc;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf9fc;padding:32px 12px;">
+<html><body style="margin:0;padding:0;background:#f8faf4;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8faf4;padding:32px 12px;">
 <tr><td align="center">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid ${BRAND.border};border-radius:16px;overflow:hidden;">
     <tr><td style="background:${BRAND.color};padding:22px 28px;">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-        <td style="font:700 18px/1 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#ffffff;letter-spacing:0.2px;">&#9986;&#65039; ${BRAND.name}</td>
+        <td style="font:700 18px/1 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#ffffff;letter-spacing:0.2px;">&#128065;&#65039; ${BRAND.name}</td>
       </tr></table>
     </td></tr>
     <tr><td style="padding:26px 28px 4px;font:700 20px/1.3 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${BRAND.text};">${title}</td></tr>

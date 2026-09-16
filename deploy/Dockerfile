@@ -1,4 +1,4 @@
-# ClassCheck — production image (bun + Next standalone + SQLite)
+# Rollmark — production image (bun + Next standalone + SQLite)
 # Build happens on the deploy machine: docker build (or docker compose build).
 
 FROM oven/bun:1
@@ -15,9 +15,9 @@ RUN bunx prisma generate
 RUN bun run build
 
 # 3. runtime plumbing
-COPY deploy/entrypoint.sh /usr/local/bin/classcheck-entrypoint
+COPY deploy/entrypoint.sh /usr/local/bin/rollmark-entrypoint
 COPY deploy/bootstrap.ts /app/bootstrap.ts
-RUN chmod +x /usr/local/bin/classcheck-entrypoint
+RUN chmod +x /usr/local/bin/rollmark-entrypoint
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -31,4 +31,4 @@ EXPOSE 3000
 #   - JWT secret    : /app/db/.auth-secret     (auto-generated + persisted if AUTH_SECRET unset)
 VOLUME ["/app/db"]
 
-ENTRYPOINT ["classcheck-entrypoint"]
+ENTRYPOINT ["rollmark-entrypoint"]

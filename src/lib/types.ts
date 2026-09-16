@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — Shared domain types (single source of truth)
+// Rollmark — Shared domain types (single source of truth)
 // Every view + API route codes against these shapes.
 // ============================================================
 

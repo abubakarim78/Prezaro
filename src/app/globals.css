@@ -45,71 +45,71 @@
 
 :root {
   --radius: 0.75rem;
-  --background: oklch(0.988 0.003 300);
-  --foreground: oklch(0.16 0.012 300);
+  --background: oklch(0.988 0.005 122);
+  --foreground: oklch(0.17 0.014 130);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0.012 300);
+  --card-foreground: oklch(0.17 0.014 130);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.012 300);
-  --primary: oklch(0.54 0.23 293);
+  --popover-foreground: oklch(0.17 0.014 130);
+  --primary: oklch(0.51 0.095 128);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.958 0.012 300);
-  --secondary-foreground: oklch(0.28 0.04 295);
-  --muted: oklch(0.958 0.008 300);
-  --muted-foreground: oklch(0.5 0.02 300);
-  --accent: oklch(0.943 0.03 295);
-  --accent-foreground: oklch(0.35 0.1 293);
+  --secondary: oklch(0.957 0.012 124);
+  --secondary-foreground: oklch(0.3 0.035 130);
+  --muted: oklch(0.957 0.009 124);
+  --muted-foreground: oklch(0.47 0.022 130);
+  --accent: oklch(0.94 0.026 126);
+  --accent-foreground: oklch(0.33 0.05 130);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.912 0.012 300);
-  --input: oklch(0.912 0.012 300);
-  --ring: oklch(0.6 0.19 293);
-  --chart-1: oklch(0.55 0.22 292);
-  --chart-2: oklch(0.62 0.21 330);
-  --chart-3: oklch(0.78 0.15 75);
-  --chart-4: oklch(0.68 0.13 190);
-  --chart-5: oklch(0.62 0.21 15);
-  --sidebar: oklch(0.972 0.006 300);
-  --sidebar-foreground: oklch(0.16 0.012 300);
-  --sidebar-primary: oklch(0.54 0.23 293);
+  --border: oklch(0.91 0.014 124);
+  --input: oklch(0.91 0.014 124);
+  --ring: oklch(0.55 0.09 128);
+  --chart-1: oklch(0.52 0.095 128);
+  --chart-2: oklch(0.66 0.12 96);
+  --chart-3: oklch(0.78 0.15 82);
+  --chart-4: oklch(0.6 0.09 165);
+  --chart-5: oklch(0.58 0.13 35);
+  --sidebar: oklch(0.97 0.008 122);
+  --sidebar-foreground: oklch(0.17 0.014 130);
+  --sidebar-primary: oklch(0.51 0.095 128);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.943 0.03 295);
-  --sidebar-accent-foreground: oklch(0.35 0.1 293);
-  --sidebar-border: oklch(0.912 0.012 300);
-  --sidebar-ring: oklch(0.6 0.19 293);
+  --sidebar-accent: oklch(0.94 0.026 126);
+  --sidebar-accent-foreground: oklch(0.33 0.05 130);
+  --sidebar-border: oklch(0.91 0.014 124);
+  --sidebar-ring: oklch(0.55 0.09 128);
 }
 
 .dark {
-  --background: oklch(0.16 0.012 300);
-  --foreground: oklch(0.97 0.004 300);
-  --card: oklch(0.2 0.014 300);
-  --card-foreground: oklch(0.97 0.004 300);
-  --popover: oklch(0.21 0.014 300);
-  --popover-foreground: oklch(0.97 0.004 300);
-  --primary: oklch(0.7 0.17 295);
-  --primary-foreground: oklch(0.16 0.03 295);
-  --secondary: oklch(0.26 0.016 300);
-  --secondary-foreground: oklch(0.97 0.004 300);
-  --muted: oklch(0.25 0.014 300);
-  --muted-foreground: oklch(0.68 0.015 300);
-  --accent: oklch(0.28 0.045 295);
-  --accent-foreground: oklch(0.9 0.05 295);
+  --background: oklch(0.165 0.011 130);
+  --foreground: oklch(0.965 0.006 124);
+  --card: oklch(0.205 0.013 130);
+  --card-foreground: oklch(0.965 0.006 124);
+  --popover: oklch(0.215 0.013 130);
+  --popover-foreground: oklch(0.965 0.006 124);
+  --primary: oklch(0.73 0.115 127);
+  --primary-foreground: oklch(0.17 0.03 130);
+  --secondary: oklch(0.265 0.015 128);
+  --secondary-foreground: oklch(0.965 0.006 124);
+  --muted: oklch(0.255 0.013 128);
+  --muted-foreground: oklch(0.68 0.02 128);
+  --accent: oklch(0.285 0.028 128);
+  --accent-foreground: oklch(0.9 0.045 128);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.17 295);
-  --chart-1: oklch(0.7 0.17 295);
-  --chart-2: oklch(0.72 0.18 330);
-  --chart-3: oklch(0.8 0.15 80);
-  --chart-4: oklch(0.72 0.12 190);
-  --chart-5: oklch(0.7 0.19 15);
-  --sidebar: oklch(0.18 0.012 300);
-  --sidebar-foreground: oklch(0.97 0.004 300);
-  --sidebar-primary: oklch(0.7 0.17 295);
-  --sidebar-primary-foreground: oklch(0.16 0.03 295);
-  --sidebar-accent: oklch(0.28 0.045 295);
-  --sidebar-accent-foreground: oklch(0.9 0.05 295);
+  --ring: oklch(0.73 0.115 127);
+  --chart-1: oklch(0.72 0.11 127);
+  --chart-2: oklch(0.74 0.12 96);
+  --chart-3: oklch(0.8 0.15 82);
+  --chart-4: oklch(0.72 0.09 165);
+  --chart-5: oklch(0.7 0.12 35);
+  --sidebar: oklch(0.185 0.011 130);
+  --sidebar-foreground: oklch(0.965 0.006 124);
+  --sidebar-primary: oklch(0.73 0.115 127);
+  --sidebar-primary-foreground: oklch(0.17 0.03 130);
+  --sidebar-accent: oklch(0.285 0.028 128);
+  --sidebar-accent-foreground: oklch(0.9 0.045 128);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.7 0.17 295);
+  --sidebar-ring: oklch(0.73 0.115 127);
 }
 
 @layer base {
@@ -138,14 +138,14 @@
   }
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: oklch(0.7 0.02 300 / 35%) transparent;
+    scrollbar-color: oklch(0.6 0.03 128 / 40%) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: oklch(0.7 0.01 160 / 35%);
+    background: oklch(0.65 0.03 128 / 45%);
     border-radius: 999px;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
@@ -160,6 +160,56 @@
   }
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+/* ---- Rollmark brand eye ------------------------------------ */
+/* The glyph blinks on its own and glances around the room.      */
+@keyframes rm-eye-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  91% {
+    transform: scaleY(0.05);
+  }
+  94.5% {
+    transform: scaleY(1);
+  }
+}
+@keyframes rm-eye-look {
+  0%,
+  18% {
+    transform: translate(0, 0);
+  }
+  28%,
+  43% {
+    transform: translate(1.1px, 0.35px);
+  }
+  53%,
+  68% {
+    transform: translate(-1px, -0.25px);
+  }
+  78%,
+  92% {
+    transform: translate(0.35px, 0.45px);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+.rm-eye-blink {
+  animation: rm-eye-blink 4.6s ease-in-out infinite;
+  transform-origin: 12px 12px;
+}
+.rm-eye-look {
+  animation: rm-eye-look 7.3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rm-eye-blink,
+  .rm-eye-look {
+    animation: none;
   }
 }
 

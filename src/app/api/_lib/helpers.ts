@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — shared API route helpers (server-only)
+// Rollmark — shared API route helpers (server-only)
 // Error wrapper, DTO mappers, scoping & access guards.
 //
 // Scoping model (documented for all routes):

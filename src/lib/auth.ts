@@ -1,5 +1,5 @@
 // ============================================================
-// ClassCheck — server-only auth helpers
+// Rollmark — server-only auth helpers
 // JWT (jose, HS256) + httpOnly cookie `cc_token` + guards.
 // ============================================================
 import { SignJWT, jwtVerify } from 'jose'
@@ -81,7 +81,7 @@ function resolveSecret(): string {
     return cachedSecret
   } catch {
     // Read-only fs — derive a stable fallback rather than crashing logins.
-    cachedSecret = 'classcheck-derived-' + (process.env.DATABASE_URL ?? 'local')
+    cachedSecret = 'rollmark-derived-' + (process.env.DATABASE_URL ?? 'local')
     return cachedSecret
   }
 }

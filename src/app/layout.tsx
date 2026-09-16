@@ -15,17 +15,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "ClassCheck — Face Attendance",
-    template: "%s · ClassCheck",
+    default: "Rollmark — Face Attendance",
+    template: "%s · Rollmark",
   },
   description:
     "Face-recognition attendance for lecture halls. Enroll students, scan the room, get trusted attendance data in under two minutes.",
-  applicationName: "ClassCheck",
+  applicationName: "Rollmark",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ClassCheck",
+    title: "Rollmark",
   },
   formatDetection: {
     telephone: false,
@@ -38,8 +38,8 @@ export const viewport: Viewport = {
   maximumScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7faf8" },
-    { media: "(prefers-color-scheme: dark)", color: "#101815" },
+    { media: "(prefers-color-scheme: light)", color: "#fafcf8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d0f0a" },
   ],
 };
 
