@@ -64,10 +64,9 @@ export default function OnboardingView() {
   const setUser = useAppStore((s) => s.setUser)
   const replace = useAppStore((s) => s.replace)
 
-  // Lecturers who are already onboarded arrive via “New course” — skip the
-  // profile/department steps and open straight on “Your courses”, where the
-  // Level and Semester options live.
-  const [step, setStep] = useState(user?.onboarded ? 2 : 0)
+  // First-time setup only — onboarded lecturers manage courses in the
+  // dedicated "Your courses" screen instead of this wizard.
+  const [step, setStep] = useState(0)
 
   // Step 1 — details
   const [name, setName] = useState(user?.name ?? '')
@@ -84,7 +83,7 @@ export default function OnboardingView() {
   // Step 3 — courses
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [pendingCourses, setPendingCourses] = useState<PendingCourse[]>([])
-  const [addOpen, setAddOpen] = useState(Boolean(user?.onboarded))
+  const [addOpen, setAddOpen] = useState(false)
   const [cCode, setCCode] = useState('')
   const [cTitle, setCTitle] = useState('')
   const [cLevel, setCLevel] = useState<string>('100')
@@ -255,7 +254,7 @@ export default function OnboardingView() {
           <div className="leading-tight">
             <p className="font-semibold tracking-tight">Rollmark</p>
             <p className="text-[11px] text-muted-foreground">
-              {user?.onboarded ? 'Add a course or edit your profile' : 'Set up your lecturer profile'}
+              Set up your lecturer profile
             </p>
           </div>
         </div>

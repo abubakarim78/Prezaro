@@ -13,6 +13,7 @@ import { watchForUpdates } from '@/lib/pwa'
 
 import LoginView from '@/components/app/views/login'
 import OnboardingView from '@/components/app/views/onboarding'
+import CoursesView from '@/components/app/views/courses'
 import HomeView from '@/components/app/views/home'
 import StudentsView from '@/components/app/views/students'
 import StudentView from '@/components/app/views/student'
@@ -160,6 +161,12 @@ function RollmarkInner() {
       return (
         <AppShell>
           {view === 'students' ? <StudentsView /> : <StudentView />}
+        </AppShell>
+      )
+    case 'courses':
+      return (
+        <AppShell>
+          <CoursesView />
         </AppShell>
       )
     case 'sessions':

@@ -352,3 +352,21 @@ Work Log:
 
 Stage Summary:
 - Task 21 confirmed COMPLETE (implemented in previous session; report lost to context limit). User's continued reports of old behaviour are explained by their installed PWA running a stale bundle — Task 22's "New version ready — Restart" prompt now makes updates visible and one-tap.
+
+---
+Task ID: 23
+Agent: Z.ai Code (main)
+Task: "New course" for an already-onboarded lecturer opened the onboarding wizard (Step 3 of 3 progress bar) — user wants a dedicated course screen distinct from first-time setup.
+
+Work Log:
+- Root cause: home.tsx QuickAction "New course" → navigate('onboarding'); onboarding rendered the wizard chrome (Step 3 of 3, progress bars, Back/Finish) even for onboarded lecturers (Task 20 had only fast-forwarded them to step 2).
+- New dedicated view src/components/app/views/courses.tsx — "Your courses" management page inside AppShell (no wizard chrome): PageHeader with live count, course cards (code chip, title, Level/Term badges, student count, edit pencil), "Add course" toggle button + inline create form (Code/Level/Title/Term with Semester 1/2 + Trimester 1/2/3), EmptyState for first course, skeletons + error retry; edit via Dialog (PATCH /api/courses/[id]); create POSTs /api/courses immediately (no more wizard "pending" buffer).
+- store.ts ViewName += 'courses'; rollmark-app.tsx renders CoursesView in AppShell (not immersive); home.tsx "New course" → navigate('courses').
+- onboarding.tsx reverted to first-time-setup only (step always starts 0, Add course collapsed, subtitle always "Set up your lecturer profile").
+- Fixed TS18047 in courses.tsx (courses === null narrowing).
+- E2E (agent-browser, admin account onboarded through wizard then reverted): first-time onboarding still starts at Step 0 (regression ✓); Home → New course → dedicated "Your courses" page with AppShell, no wizard (screenshot /tmp/rm-courses-page.png); created TST 501 (toast "TST 501 added") — initial select clicks used stale refs so it saved defaults (not a bug); edit dialog opened with correct values, changed to Level 500 + Trimester 3 via fresh refs, saved ("TST 501 updated", list shows Level 500 · Trimester 3, screenshot /tmp/rm-course-edited.png); mobile 390×844 layout clean with bottom nav (screenshot /tmp/rm-courses-mobile.png).
+- Cleanup: TST course deleted; admin reset to onboarded=false/departmentId=null/name "Department Admin"/title null. DB verified: only SPS 201 remains. bun run lint + tsc clean (pre-existing examples/skills errors excluded); dev.log clean.
+
+Stage Summary:
+- Onboarded lecturers now get a real course management screen (list/add/edit) instead of the onboarding wizard; onboarding is first-time-setup only.
+- New artifacts: src/components/app/views/courses.tsx; modified: store.ts, rollmark-app.tsx, home.tsx, onboarding.tsx.

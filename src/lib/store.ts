@@ -10,6 +10,7 @@ import type { SessionMode, User } from './types'
 export type ViewName =
   | 'login'
   | 'onboarding'
+  | 'courses'
   | 'home'
   | 'students'
   | 'student'

@@ -227,7 +227,7 @@ export default function HomeView() {
           {/* ---------- Quick actions ---------- */}
           <div className="grid grid-cols-3 gap-3">
             <QuickAction icon={UserPlus} label="Add student" onClick={() => navigate('students')} />
-            <QuickAction icon={BookPlus} label="New course" onClick={() => navigate('onboarding')} />
+            <QuickAction icon={BookPlus} label="New course" onClick={() => navigate('courses')} />
             <QuickAction icon={BarChart3} label="Reports" onClick={() => navigate('reports')} />
           </div>
 
