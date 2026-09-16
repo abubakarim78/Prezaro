@@ -255,7 +255,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="-mt-6 flex h-14 w-14 flex-col items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-background transition-transform active:scale-95"
               aria-label="Take attendance"
             >
-              <ScanFace className="h-6 w-6" />
+              <FaceScanMark className="h-6 w-6" />
             </button>
           </div>
 

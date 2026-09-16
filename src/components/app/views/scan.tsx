@@ -19,7 +19,6 @@ import {
   Search,
   SwitchCamera,
   UserPlus,
-  Users,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -32,7 +31,6 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Sheet,
   SheetContent,
@@ -407,7 +405,7 @@ export default function ScanView() {
         </Button>
         <div>
           <h1 className="text-lg font-bold tracking-tight">Take attendance</h1>
-          <p className="text-xs text-muted-foreground">Choose a course and scan mode</p>
+          <p className="text-xs text-muted-foreground">Choose a course to scan</p>
         </div>
       </header>
 
@@ -478,35 +476,17 @@ export default function ScanView() {
               </p>
             )}
 
-            <div>
-              <p className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Scan mode
-              </p>
-              <ToggleGroup
-                type="single"
-                value={mode}
-                onValueChange={(v) => v && setMode(v as SessionMode)}
-                className="w-full rounded-xl border bg-card p-1"
-              >
-                <ToggleGroupItem
-                  value="WALKTHROUGH"
-                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-                >
-                  <Users className="h-4 w-4" /> Walkthrough
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="KIOSK"
-                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-                >
-                  <ScanFace className="h-4 w-4" /> Kiosk
-                </ToggleGroupItem>
-              </ToggleGroup>
-              <p className="mt-1.5 px-1 text-xs text-muted-foreground">
-                {mode === 'WALKTHROUGH'
-                  ? 'Walk around the hall — the app recognises each student automatically.'
-                  : 'Students come to the camera one at a time — a single glance checks them in.'}
-              </p>
-            </div>
+            {/* Scan mode comes from Settings → Default scan mode (read-only here) */}
+            <p className="rounded-xl border bg-card px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+              Mode:{' '}
+              <span className="font-semibold text-foreground">
+                {mode === 'WALKTHROUGH' ? 'Walkthrough' : 'Kiosk'}
+              </span>{' '}
+              — change it in Settings.{' '}
+              {mode === 'WALKTHROUGH'
+                ? 'Walk around the hall — the app recognises each student automatically.'
+                : 'Students come to the camera one at a time — a single glance checks them in.'}
+            </p>
           </div>
         )}
       </main>

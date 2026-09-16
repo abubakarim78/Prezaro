@@ -392,3 +392,21 @@ Stage Summary:
 - Gate strictness unchanged — template quality preserved
 - Note: shear-transform trick cannot fake head turns (68-landmark net normalizes pose); real turned-head photos required for E2E
 - Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open
+
+---
+Task ID: 25
+Agent: Z.ai Code (main)
+Task: (a) Remove scan-mode picker from scan setup — mode choice lives on Settings page; (b) Apply blinking-eye FaceScanMark brand icon to the mobile bottom-nav center scan button
+
+Work Log:
+- scan.tsx: removed the interactive "Scan mode" ToggleGroup (Walkthrough/Kiosk) + its import + now-unused Users icon import; header subtitle "Choose a course and scan mode" → "Choose a course to scan"; added read-only card "Mode: <Walkthrough|Kiosk> — change it in Settings." + one-line behaviour description. mode state still initialises from server settings default (setMode(d.settings.defaultMode)) so the session uses the Settings choice with zero logic change
+- settings.tsx: untouched — "Default scan mode" RadioGroup already lives there (user confirmed via screenshot it should stay on Settings)
+- shell.tsx: mobile bottom-nav center scan button now renders FaceScanMark (brand SVG whose two eyes blink via rm-eye-blink keyframes, honours prefers-reduced-motion) instead of the static lucide ScanFace; ScanFace retained for the desktop sidebar widget
+- Verification: lint clean, tsc clean (src); agent-browser E2E at 390×844 viewport with throwaway lecturer (nav-test@rollmark.test, dept NAV, course NAV 101): nav button exposes 2 .rm-scan-eye elements with computed animationName rm-eye-blink; Settings shows "Default scan mode" + Walkthrough/Kiosk radios; scan screen has NO picker, shows "Mode: Walkthrough — change it in Settings…"; no page errors
+- Cleanup: deleted throwaway dept/lecturer/course, cleared browser storage; DB pristine (0 students, SPS 201 only); dev.log clean
+
+Stage Summary:
+- Scan-mode selection is now Settings-only; scan setup reflects the active mode read-only — one source of truth
+- Blinking-eye brand mark applied to the bottom nav capture button (brand consistency, reduced-motion safe)
+- Interpretation note: user's message pointed at the Settings screenshot showing "Default scan mode"; action taken = remove the duplicate picker from the scan flow, keep the Settings section
+- Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open
