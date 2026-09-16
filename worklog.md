@@ -410,3 +410,23 @@ Stage Summary:
 - Blinking-eye brand mark applied to the bottom nav capture button (brand consistency, reduced-motion safe)
 - Interpretation note: user's message pointed at the Settings screenshot showing "Default scan mode"; action taken = remove the duplicate picker from the scan flow, keep the Settings section
 - Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open
+
+---
+Task ID: 26
+Agent: Z.ai Code (main)
+Task: "I didn't see the update pop on my pwa mobile app when I published the new changes" — PWA update toast never appeared after publishing.
+
+Work Log:
+- Diagnosis: Task 22's toast only fired when a new worker reached `activated` while a page was open and listening. Three real-world flows missed it entirely: (1) cold start after publish — the new worker installs + skipWaiting + activates during page load, usually BEFORE React mounts and attaches listeners, so no activation event is ever observed; (2) app resumed from memory — detection relied only on visibilitychange throttled to 10 min, no boot check / focus check / polling; (3) browsers only check sw.js on real navigations (spec-throttled ~24h) and installed PWAs frequently resume without navigating.
+- Rewrote src/lib/pwa.ts watchForUpdates with three detection paths: (1) mid-session activation via installing/updatefound statechange (kept, plus sync-state guard); (2) NEW boot handshake — page asks the controlling worker its VERSION via MessageChannel, compares with localStorage['rollmark.swVersion.v1'], prompts on mismatch; sessionStorage flag makes the post-"Restart" boot record silently instead of re-prompting (flag auto-clears when the app is fully closed so ignored prompts resurface next launch); (3) NEW explicit re-checks — reg.update() on boot, on focus, on visibilitychange (throttle 10 min → 60 s) and a 4-min poll while visible; all timers/listeners disposed properly.
+- public/sw.js: added message handler replying VERSION to GET_VERSION pings (answers on the transferred MessageChannel port, falls back to event.source); VERSION bumped v6 → v7. Fixed during E2E: initial handler replied to event.source instead of event.ports[0], so the handshake timed out silently.
+- next.config.ts: headers() → /sw.js Cache-Control no-cache, must-revalidate (guarantees revalidation on any host; dev auto-restarted to apply).
+- deploy/Dockerfile: build step stamps public/sw.js VERSION with a build timestamp (sed) so EVERY published image is detected as an update by installed PWAs even when sw.js logic is unchanged between releases.
+- E2E (agent-browser): mid-session path — edited sw.js on disk + reg.update() → toast "New version ready — Restart" appeared (screenshot /tmp/rm-update-toast.png); clicked Restart → version recorded silently, no re-toast. Cold-start path (user's exact scenario) — bumped version on disk + reload → toast appeared (screenshot /tmp/rm-update-toast-coldstart.png); Restart → stored version updated, no re-toast. Hardened handshake early-return paths to clear stale restart flags.
+- Cleanup: sw.js restored to rollmark-v7; test browser SW unregistered, 2 caches + storage cleared; bun run lint clean; tsc clean (src); dev.log clean; DB untouched.
+
+Stage Summary:
+- Update toasts now surface on every publish flow: app open (mid-session), app resumed (poll/focus/visibility), app closed (boot handshake), even when the worker activates before the page mounts.
+- Deploys are self-notifying: Docker build stamps a unique SW version per publish; sw.js is always revalidated.
+- One-time bootstrap note for the user: devices still running a pre-toast bundle need one manual restart (close + reopen PWA) to load this code; every publish after that pops automatically.
+- Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open.

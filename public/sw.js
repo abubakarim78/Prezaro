@@ -1,5 +1,5 @@
 /* Rollmark service worker — offline-first app shell */
-const VERSION = 'rollmark-v6'
+const VERSION = 'rollmark-v7'
 const SHELL_CACHE = `${VERSION}-shell`
 const STATIC_CACHE = `${VERSION}-static`
 
@@ -32,6 +32,18 @@ self.addEventListener('install', (event) => {
       await self.skipWaiting()
     })()
   )
+})
+
+// Reply to version pings so pages can detect updates that installed and
+// activated while the app was closed (see src/lib/pwa.ts boot handshake).
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'GET_VERSION' && event.source) {
+    const reply = { type: 'VERSION', version: VERSION }
+    // Answer on the transferred MessageChannel port when one was provided
+    // (the pwa.ts handshake), falling back to the client directly.
+    if (event.ports && event.ports.length > 0) event.ports[0].postMessage(reply)
+    else event.source.postMessage(reply)
+  }
 })
 
 self.addEventListener('activate', (event) => {

@@ -1,0 +1,187 @@
+'use client'
+
+import { useEffect } from 'react'
+import { ThemeProvider } from 'next-themes'
+import { useAppStore } from '@/lib/store'
+import { api, getErrorMessage, clearAuthToken, setUnauthorizedHandler } from '@/lib/api'
+import { flushQueue, pendingCount } from '@/lib/offline'
+import { OfflineError } from '@/lib/api'
+import { toast } from 'sonner'
+import { Loader2 } from 'lucide-react'
+
+import LoginView from '@/components/app/views/login'
+import OnboardingView from '@/components/app/views/onboarding'
+import HomeView from '@/components/app/views/home'
+import StudentsView from '@/components/app/views/students'
+import StudentView from '@/components/app/views/student'
+import EnrollView from '@/components/app/views/enroll'
+import ScanView from '@/components/app/views/scan'
+import ReviewView from '@/components/app/views/review'
+import SessionsView from '@/components/app/views/sessions'
+import SessionView from '@/components/app/views/session'
+import ReportsView from '@/components/app/views/reports'
+import AdminView from '@/components/app/views/admin'
+import SettingsView from '@/components/app/views/settings'
+import { AppShell } from '@/components/app/shell'
+
+/** Views rendered full-screen without the nav shell */
+const IMMERSIVE_VIEWS = new Set(['login', 'onboarding', 'scan', 'enroll', 'review'])
+
+export default function ClassCheckApp() {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <ClassCheckInner />
+    </ThemeProvider>
+  )
+}
+
+function ClassCheckInner() {
+  const {
+    booted,
+    user,
+    view,
+    setBooted,
+    setUser,
+    setOnline,
+    setPendingSync,
+    setOpenSession,
+    replace,
+  } = useAppStore()
+
+  // ---- Boot: SW registration, connectivity, auth check ----
+  useEffect(() => {
+    let alive = true
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+
+    const updateOnline = () => {
+      const online = navigator.onLine
+      setOnline(online)
+      if (online) {
+        flushQueue()
+          .then((n) => {
+            if (!alive) return
+            setPendingSync(pendingCount())
+            if (n > 0) toast.success(`Synced ${n} offline record${n === 1 ? '' : 's'}`)
+          })
+          .catch(() => {})
+      }
+    }
+
+    updateOnline()
+    window.addEventListener('online', updateOnline)
+    window.addEventListener('offline', updateOnline)
+
+    // Any 401 means the session is gone — return to the login screen.
+    setUnauthorizedHandler(() => {
+      const hadUser = useAppStore.getState().user !== null
+      clearAuthToken()
+      const s = useAppStore.getState()
+      s.setUser(null)
+      s.setOpenSession(null)
+      s.replace('login')
+      if (hadUser) toast.error('Your session has expired — please sign in again')
+    })
+
+    ;(async () => {
+      try {
+        const { user } = await api<{ user: import('@/lib/types').User | null }>('/api/auth/me')
+        if (!alive) return
+        if (user) {
+          setUser(user)
+          replace(user.onboarded ? 'home' : 'onboarding')
+        } else {
+          // No valid session (cookie blocked / token expired) — clean slate.
+          clearAuthToken()
+          replace('login')
+        }
+      } catch (e) {
+        // offline but we may still have a cached session; treat as login gate
+        if (!alive) return
+        replace('login')
+        if (!(e instanceof OfflineError)) {
+          console.warn(getErrorMessage(e))
+        }
+      } finally {
+        if (alive) setBooted(true)
+      }
+    })()
+
+    return () => {
+      alive = false
+      window.removeEventListener('online', updateOnline)
+      window.removeEventListener('offline', updateOnline)
+      setUnauthorizedHandler(null)
+    }
+  }, [setBooted, setUser, setOnline, setPendingSync, replace, setOpenSession])
+
+  if (!booted) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-background">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+          <Loader2 className="h-7 w-7 animate-spin" />
+        </div>
+        <p className="text-sm text-muted-foreground font-medium">ClassCheck</p>
+      </div>
+    )
+  }
+
+  if (IMMERSIVE_VIEWS.has(view) || !user) {
+    switch (view) {
+      case 'onboarding':
+        return <OnboardingView />
+      case 'scan':
+        return <ScanView />
+      case 'enroll':
+        return <EnrollView />
+      case 'review':
+        return <ReviewView />
+      default:
+        return <LoginView />
+    }
+  }
+
+  switch (view) {
+    case 'students':
+    case 'student':
+      return (
+        <AppShell>
+          {view === 'students' ? <StudentsView /> : <StudentView />}
+        </AppShell>
+      )
+    case 'sessions':
+    case 'session':
+      return (
+        <AppShell>
+          {view === 'sessions' ? <SessionsView /> : <SessionView />}
+        </AppShell>
+      )
+    case 'reports':
+      return (
+        <AppShell>
+          <ReportsView />
+        </AppShell>
+      )
+    case 'admin':
+      return (
+        <AppShell>
+          <AdminView />
+        </AppShell>
+      )
+    case 'settings':
+      return (
+        <AppShell>
+          <SettingsView />
+        </AppShell>
+      )
+    case 'home':
+    default:
+      return (
+        <AppShell>
+          <HomeView />
+        </AppShell>
+      )
+  }
+}

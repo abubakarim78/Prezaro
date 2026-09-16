@@ -11,6 +11,13 @@ RUN bun install --frozen-lockfile
 
 # 2. app source + prisma client + production build
 COPY . .
+
+# Stamp the service worker with a build-unique version so every published
+# image is seen as an update by installed PWAs (update toast + cache
+# refresh), even when sw.js itself did not change between releases.
+RUN stamp="rollmark-$(date -u +%Y%m%d%H%M%S)" \
+ && sed -i "s|const VERSION = '.*'|const VERSION = '${stamp}'|" public/sw.js
+
 RUN bunx prisma generate
 RUN bun run build
 
