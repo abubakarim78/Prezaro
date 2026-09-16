@@ -44,6 +44,12 @@ import {
   type FaceApi,
   type FaceResult,
 } from '@/lib/face/engine'
+import {
+  playAllDone,
+  playFaceDetected,
+  playPoseCaptured,
+  unlockCaptureAudio,
+} from '@/lib/face/sounds'
 
 // ---------- Tunables ----------------------------------------
 
@@ -58,6 +64,9 @@ const NO_FACE_HINT_MS = 1800
 const THUMB_SIZE = 96
 const PHOTO_SIZE = 320 // reference photo stored alongside the template
 const CONFIRM_DELAY_MS = 300
+const AUTO_CAPTURE_MS = 900 // gates must hold this long → auto capture
+const DETECT_BLIP_GAP_MS = 1500 // min gap between face-detected blips
+const RING_C = 2 * Math.PI * 33 // auto-capture progress ring circumference
 
 const POSES: { label: string; hint: string; ok: (off: number) => boolean }[] = [
   {
@@ -276,7 +285,11 @@ export default function EnrollView() {
           <Button
             className="h-12 w-full text-base font-semibold"
             disabled={!agreed}
-            onClick={() => setPhase('capture')}
+            onClick={() => {
+              // user gesture → unlock Web Audio for the capture cues
+              unlockCaptureAudio()
+              setPhase('capture')
+            }}
           >
             Continue to capture
           </Button>
@@ -445,6 +458,7 @@ function CaptureStage({
   const [poseOk, setPoseOk] = useState(false)
   const [faceMissing, setFaceMissing] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [autoProgress, setAutoProgress] = useState(0) // 0–1 auto-capture ring fill
   const [captures, setLocalCaptures] = useState<Float32Array[]>([])
   const [thumbs, setLocalThumbs] = useState<string[]>([])
 
@@ -457,6 +471,11 @@ function CaptureStage({
   const busyRef = useRef(false)
   const aliveRef = useRef(true)
   const engineRef = useRef<FaceApi | null>(null)
+  const autoLockRef = useRef(false) // true between auto-capture and advance
+  const poseOkSinceRef = useRef(0) // performance.now() when gates started holding
+  const hadFaceRef = useRef(false) // face present in the previous tick?
+  const lastBlipAtRef = useRef(0)
+  const captureFnRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     engineRef.current = engine
@@ -494,9 +513,15 @@ function CaptureStage({
     const video = videoRef.current
     if (!video) return
 
-    // defer status update out of the synchronous effect body
+    // defer status updates out of the synchronous effect body
     Promise.resolve().then(() => {
-      if (!cancelled) setCameraState('starting')
+      if (cancelled) return
+      setCameraState('starting')
+      // fresh stability window on every (re)start
+      autoLockRef.current = false
+      poseOkSinceRef.current = 0
+      hadFaceRef.current = false
+      setAutoProgress(0)
     })
     startCamera(video, facing)
       .then((s) => {
@@ -552,8 +577,9 @@ function CaptureStage({
   const captureCurrent = () => {
     const video = videoRef.current
     const face = lastFaceRef.current
-    if (!video || !face || busyRef.current) return
+    if (!video || !face || autoLockRef.current) return
     const currentPose = poseIdxRef.current
+    autoLockRef.current = true
     busyRef.current = true
     capturedRef.current = [...capturedRef.current, face.descriptor]
     setCaptures([...capturedRef.current])
@@ -569,13 +595,21 @@ function CaptureStage({
       setLocalThumbs((prev) => [...prev, thumb])
     }
     navigator.vibrate?.(40)
+    playPoseCaptured()
 
     const advance = () => {
+      autoLockRef.current = false
+      poseOkSinceRef.current = 0
+      setAutoProgress(0)
       busyRef.current = false
       setConfirming(false)
       setPoseOk(false)
-      if (currentPose + 1 >= POSES.length) onDone()
-      else setPoseIdx(currentPose + 1)
+      if (currentPose + 1 >= POSES.length) {
+        playAllDone()
+        onDone()
+      } else {
+        setPoseIdx(currentPose + 1)
+      }
     }
 
     if (currentPose === 0) {
@@ -602,6 +636,11 @@ function CaptureStage({
     }
   }
 
+  // keep the latest capture function reachable from the detection loop
+  useEffect(() => {
+    captureFnRef.current = captureCurrent
+  })
+
   // detection loop
   useEffect(() => {
     aliveRef.current = true
@@ -627,6 +666,9 @@ function CaptureStage({
         if (!face) {
           drawOverlay(canvas, video, [], [], { mirror })
           lastFaceRef.current = null
+          hadFaceRef.current = false
+          poseOkSinceRef.current = 0
+          setAutoProgress(0)
           setFaceMissing(Date.now() - lastSeenAtRef.current > NO_FACE_HINT_MS)
           setPoseOk(false)
           return
@@ -634,6 +676,13 @@ function CaptureStage({
         lastFaceRef.current = face
         lastSeenAtRef.current = Date.now()
         setFaceMissing(false)
+
+        // audio cue when the camera (re)acquires the face — "we see you"
+        if (!hadFaceRef.current && Date.now() - lastBlipAtRef.current > DETECT_BLIP_GAP_MS) {
+          lastBlipAtRef.current = Date.now()
+          playFaceDetected()
+        }
+        hadFaceRef.current = true
 
         const vw = video.videoWidth || 1
         const off = noseOffset(face)
@@ -643,6 +692,24 @@ function CaptureStage({
         const angleOk = POSES[poseIdxRef.current].ok(off)
         const ok = sizeOk && centered && angleOk
         setPoseOk(ok)
+
+        // auto-capture: all gates must hold steady for AUTO_CAPTURE_MS
+        if (!ok || autoLockRef.current) {
+          poseOkSinceRef.current = 0
+          setAutoProgress(0)
+        } else if (poseOkSinceRef.current === 0) {
+          poseOkSinceRef.current = performance.now()
+          setAutoProgress(0)
+        } else {
+          const held = performance.now() - poseOkSinceRef.current
+          const p = Math.min(1, held / AUTO_CAPTURE_MS)
+          setAutoProgress(p)
+          if (p >= 1) {
+            poseOkSinceRef.current = 0
+            captureFnRef.current()
+          }
+        }
+
         drawOverlay(
           canvas,
           video,
@@ -653,7 +720,8 @@ function CaptureStage({
       })()
         .catch(() => {})
         .finally(() => {
-          busyRef.current = false
+          // pose-0 confirmation keeps the loop paused via autoLockRef
+          if (!autoLockRef.current) busyRef.current = false
         })
     }
     raf = requestAnimationFrame(tick)
@@ -763,6 +831,15 @@ function CaptureStage({
                 Hold still — confirming…
               </motion.p>
             )}
+            {!confirming && poseOk && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="mt-1 rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-300"
+              >
+                Hold still — auto-capturing…
+              </motion.p>
+            )}
           </div>
         )}
       </div>
@@ -790,24 +867,56 @@ function CaptureStage({
           </div>
 
           <div className="flex flex-col items-center gap-2">
-            <button
-              type="button"
-              onClick={captureCurrent}
-              disabled={!poseOk || confirming || cameraState !== 'ready'}
-              aria-label="Capture pose"
-              className={`flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 transition-all disabled:opacity-40 ${
-                poseOk
-                  ? 'border-emerald-400 bg-emerald-500 shadow-lg shadow-emerald-500/40'
-                  : 'border-white/40 bg-white/10'
-              }`}
+            <div
+              role="status"
+              aria-label={
+                poseOk || confirming
+                  ? 'Capturing automatically — hold still'
+                  : 'Waiting for a steady pose'
+              }
+              className="relative flex h-[72px] w-[72px] items-center justify-center"
             >
-              <ScanFace className={`h-8 w-8 ${poseOk ? 'text-emerald-950' : 'text-white/70'}`} />
-            </button>
+              <svg viewBox="0 0 72 72" className="absolute inset-0 h-full w-full -rotate-90">
+                <circle
+                  cx="36"
+                  cy="36"
+                  r="33"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.18)"
+                  strokeWidth="4"
+                />
+                <circle
+                  cx="36"
+                  cy="36"
+                  r="33"
+                  fill="none"
+                  stroke="#34d399"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeDasharray={RING_C}
+                  strokeDashoffset={RING_C * (1 - (confirming ? 1 : autoProgress))}
+                  className="transition-[stroke-dashoffset] duration-150"
+                />
+              </svg>
+              <div
+                className={`flex h-[58px] w-[58px] items-center justify-center rounded-full transition-colors ${
+                  poseOk || confirming
+                    ? 'bg-emerald-500 shadow-lg shadow-emerald-500/40'
+                    : 'bg-white/10'
+                }`}
+              >
+                <ScanFace
+                  className={`h-7 w-7 ${
+                    poseOk || confirming ? 'text-emerald-950' : 'text-white/70'
+                  }`}
+                />
+              </div>
+            </div>
             <p aria-live="polite" className="h-4 text-xs text-white/70">
               {faceMissing && cameraState === 'ready'
                 ? 'No face — move closer / better lighting'
-                : poseOk
-                  ? 'Perfect — tap capture'
+                : poseOk || confirming
+                  ? 'Hold still — capturing automatically…'
                   : ''}
             </p>
           </div>

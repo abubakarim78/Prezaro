@@ -370,3 +370,25 @@ Work Log:
 Stage Summary:
 - Onboarded lecturers now get a real course management screen (list/add/edit) instead of the onboarding wizard; onboarding is first-time-setup only.
 - New artifacts: src/components/app/views/courses.tsx; modified: store.ts, rollmark-app.tsx, home.tsx, onboarding.tsx.
+
+---
+Task ID: 24
+Agent: Z.ai Code (main)
+Task: Enrollment auto-capture + audio cues (user: "auto capture the face and also add sounds when detected and captured so the student can be alert for the next pose picture")
+
+Work Log:
+- Created src/lib/face/sounds.ts — zero-asset Web Audio synth: playFaceDetected() soft blip (660Hz), playPoseCaptured() two-note ding (880→1318Hz triangle), playAllDone() rising arpeggio (C5-E5-G5-C6); AudioContext lazily created + unlocked via unlockCaptureAudio() from the "Continue to capture" user gesture (mobile autoplay policy, silent-buffer iOS unlock)
+- enroll.tsx: AUTO_CAPTURE_MS=900 stability window — all 4 gates (detection score, size 25–60%, centering, pose angle) must hold continuously; progress ring (SVG stroke-dashoffset, RING_C=2π×33) replaces the manual snap button; auto-capture fires via captureFnRef (latest-ref pattern) from the detection loop
+- autoLockRef guards double-capture during the pose-0 hidden confirm (300ms); loop finally only clears busyRef when !autoLockRef so the confirm window keeps the loop paused (mirrors old manual-capture pause semantics)
+- Face-detected blip fires on missing→found transition, throttled by DETECT_BLIP_GAP_MS=1500; capture chime in captureCurrent; all-done arpeggio in advance() before onDone()
+- Camera (re)start resets stability window (deferred setState to satisfy react-hooks/set-state-in-effect); hint text now "Hold still — capturing automatically…"
+- Gates/tolerances intentionally NOT relaxed (user declined)
+- Verification: lint clean, tsc clean (src), dev.log clean
+- E2E (agent-browser + stubbed getUserMedia over canvas.captureStream showing AI-generated faces): pose 1 auto-captured with zero taps → advanced; left-turn photo → pose 2 auto-captured; right-turn photo (regenerated once — first too frontal) → pose 3 auto-captured → "All 3 poses captured" review screen with 3 thumbnails → Save enrollment → POST ok → student shows "Re-enroll face"/"Remove face data"; DB check: 4 descriptors, photo, consent v1; no console/page errors
+- Cleanup: deleted throwaway dept/lecturer/course/student (SND 101, sounds-test@rollmark.test), removed test-face*.jpg, cleared browser storage; DB back to pristine (0 students, SPS 201 only)
+
+Stage Summary:
+- Enrollment is now fully hands-free: face detected (blip) → gates held 900ms → auto-capture (ding + vibrate) → next pose; completion arpeggio. Sounds are synthesized (no files, offline-safe, gesture-unlocked)
+- Gate strictness unchanged — template quality preserved
+- Note: shear-transform trick cannot fake head turns (68-landmark net normalizes pose); real turned-head photos required for E2E
+- Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open
