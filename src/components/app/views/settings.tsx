@@ -8,7 +8,6 @@ import { toast } from 'sonner'
 import {
   Building2,
   ChevronDown,
-  Eye,
   Footprints,
   KeyRound,
   Loader2,
@@ -55,10 +54,9 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
-import { Switch } from '@/components/ui/switch'
 import { IdentityAvatar, LoadingBlock } from '@/components/app/shared'
 
-const DEFAULTS: AppSettings = { atRiskThreshold: 75, liveness: true, defaultMode: 'WALKTHROUGH' }
+const DEFAULTS: AppSettings = { atRiskThreshold: 75, defaultMode: 'WALKTHROUGH' }
 
 const MODE_OPTIONS: { value: 'WALKTHROUGH' | 'KIOSK'; label: string; desc: string; icon: typeof Footprints }[] = [
   {
@@ -135,7 +133,6 @@ export default function SettingsView() {
   // ---- Attendance settings (autosave) ------------------------
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [threshold, setThreshold] = useState(DEFAULTS.atRiskThreshold)
-  const [liveness, setLiveness] = useState(DEFAULTS.liveness)
   const [defaultMode, setDefaultMode] = useState<'WALKTHROUGH' | 'KIOSK'>(DEFAULTS.defaultMode)
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const savedRef = useRef<AppSettings | null>(null)
@@ -148,7 +145,6 @@ export default function SettingsView() {
       const d = await api<SettingsResponse>('/api/settings')
       savedRef.current = d.settings
       setThreshold(d.settings.atRiskThreshold)
-      setLiveness(d.settings.liveness)
       setDefaultMode(d.settings.defaultMode)
       setSettingsLoaded(true)
     } catch (e) {
@@ -167,7 +163,6 @@ export default function SettingsView() {
     if (
       saved &&
       saved.atRiskThreshold === threshold &&
-      saved.liveness === liveness &&
       saved.defaultMode === defaultMode
     ) {
       return
@@ -177,7 +172,7 @@ export default function SettingsView() {
       try {
         const d = await api<SettingsResponse>('/api/settings', {
           method: 'PUT',
-          body: { atRiskThreshold: threshold, liveness, defaultMode },
+          body: { atRiskThreshold: threshold, defaultMode },
         })
         savedRef.current = d.settings
         toast.success('Settings saved')
@@ -188,7 +183,7 @@ export default function SettingsView() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [threshold, liveness, defaultMode, settingsLoaded])
+  }, [threshold, defaultMode, settingsLoaded])
 
   // ---- Appearance ---------------------------------------------
   const { theme, setTheme } = useTheme()
@@ -429,25 +424,6 @@ export default function SettingsView() {
                   <span>50%</span>
                   <span>90%</span>
                 </div>
-              </div>
-
-              {/* Liveness */}
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <Label htmlFor="liveness" className="flex items-center gap-1.5 text-sm font-medium">
-                    <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-                    Liveness check
-                  </Label>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Require head-turn check in kiosk mode to stop photo spoofs.
-                  </p>
-                </div>
-                <Switch
-                  id="liveness"
-                  checked={liveness}
-                  onCheckedChange={setLiveness}
-                  className="shrink-0"
-                />
               </div>
 
               {/* Default mode */}

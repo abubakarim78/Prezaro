@@ -34,7 +34,10 @@ interface AppState {
   user: User | null
   view: ViewName
   params: Record<string, string>
-  history: ViewName[]
+  /** Navigation stack — each entry keeps the view AND its params so
+   * back() restores e.g. `student` with its studentId (fixes the
+   * "Student not found" screen after returning from face enrollment). */
+  history: { view: ViewName; params: Record<string, string> }[]
   online: boolean
   pendingSync: number
   openSession: OpenSessionRef | null
@@ -63,7 +66,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setUser: (u) => set({ user: u }),
 
   navigate: (view, params = {}) =>
-    set((s) => ({ view, params, history: [...s.history, s.view].slice(-20) })),
+    set((s) => ({
+      view,
+      params,
+      history: [...s.history, { view: s.view, params: s.params }].slice(-20),
+    })),
 
   replace: (view, params = {}) => set({ view, params }),
 
@@ -71,7 +78,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { history } = get()
     if (history.length > 0) {
       const prev = history[history.length - 1]
-      set({ view: prev, params: {}, history: history.slice(0, -1) })
+      set({ view: prev.view, params: prev.params, history: history.slice(0, -1) })
     } else {
       set({ view: 'home', params: {} })
     }

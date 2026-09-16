@@ -20,6 +20,7 @@ import type {
   CoursesResponse,
   StudentDetail,
   StudentDetailResponse,
+  StudentsResponse,
 } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -90,8 +91,31 @@ export default function StudentView() {
       setError(null)
       setLoading(false)
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setNotFound(true)
-      else setError(getErrorMessage(e))
+      if (e instanceof ApiError && e.status === 404) {
+        // The param may be a student NUMBER (e.g. PHA/0001/26) rather than a
+        // DB id — resolve it via search before showing "not found".
+        try {
+          const q = await api<StudentsResponse>(
+            `/api/students?query=${encodeURIComponent(studentIdParam)}`
+          )
+          const match = q.students.find(
+            (s) => s.id === studentIdParam || s.studentId === studentIdParam
+          )
+          if (match) {
+            const d2 = await api<StudentDetailResponse>(`/api/students/${match.id}`)
+            setStudent(d2.student)
+            setNotFound(false)
+            setError(null)
+            setLoading(false)
+            return
+          }
+        } catch {
+          /* fall through to not-found */
+        }
+        setNotFound(true)
+      } else {
+        setError(getErrorMessage(e))
+      }
       setLoading(false)
     }
   }, [studentIdParam])
@@ -136,9 +160,9 @@ export default function StudentView() {
   }
 
   const removeFace = async () => {
-    if (!studentIdParam) return
+    if (!student) return
     try {
-      await api(`/api/students/${studentIdParam}/face`, { method: 'DELETE' })
+      await api(`/api/students/${student.id}/face`, { method: 'DELETE' })
       toast.success('Face data removed')
       load()
     } catch (e) {
@@ -290,25 +314,41 @@ export default function StudentView() {
         {/* ---------- Face enrollment ---------- */}
         <section className="rounded-2xl border bg-card p-4">
           <SectionTitle icon={ScanFace} title="Face enrollment" />
-          <div className="mt-3 flex items-center gap-2.5">
-            <span
-              className={cn(
-                'h-2.5 w-2.5 shrink-0 rounded-full',
-                student.faceEnrolled ? 'bg-emerald-500' : 'bg-muted-foreground/40'
-              )}
-            />
-            {student.faceEnrolled ? (
-              <p className="text-sm">
-                <span className="font-medium text-emerald-700 dark:text-emerald-400">Enrolled</span>
-                <span className="text-muted-foreground">
-                  {' '}
-                  · {student.descriptorsCount} template
-                  {student.descriptorsCount === 1 ? '' : 's'}
-                </span>
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">Not enrolled</p>
+          <div className="mt-3 flex items-center gap-3">
+            {student.faceEnrolled && student.photoData && (
+              <img
+                src={student.photoData}
+                alt={`${fullName} face enrollment reference`}
+                className="h-16 w-16 shrink-0 rounded-xl border object-cover"
+              />
             )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={cn(
+                    'h-2.5 w-2.5 shrink-0 rounded-full',
+                    student.faceEnrolled ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                  )}
+                />
+                {student.faceEnrolled ? (
+                  <p className="text-sm">
+                    <span className="font-medium text-emerald-700 dark:text-emerald-400">Enrolled</span>
+                    <span className="text-muted-foreground">
+                      {' '}
+                      · {student.descriptorsCount} template
+                      {student.descriptorsCount === 1 ? '' : 's'}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Not enrolled</p>
+                )}
+              </div>
+              {student.faceEnrolled && student.photoData && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Reference photo on file — used to confirm attendance marks.
+                </p>
+              )}
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button

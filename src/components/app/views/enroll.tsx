@@ -36,6 +36,7 @@ import type { StudentDetail } from '@/lib/types'
 import {
   detectSingle,
   drawOverlay,
+  enhanceForDetection,
   loadFaceEngine,
   noseOffset,
   startCamera,
@@ -55,6 +56,7 @@ const TURN_MIN = 0.04
 const TURN_MAX = 0.3
 const NO_FACE_HINT_MS = 1800
 const THUMB_SIZE = 96
+const PHOTO_SIZE = 320 // reference photo stored alongside the template
 const CONFIRM_DELAY_MS = 300
 
 const POSES: { label: string; hint: string; ok: (off: number) => boolean }[] = [
@@ -92,6 +94,7 @@ export default function EnrollView() {
 
   // capture data lives here so both CaptureStage and the save screen see it
   const capturedRef = useRef<Float32Array[]>([])
+  const photoRef = useRef<string | null>(null)
   const [captures, setCaptures] = useState<Float32Array[]>([])
   const [thumbs, setThumbs] = useState<string[]>([])
   const [poseIdx, setPoseIdx] = useState(0)
@@ -146,6 +149,7 @@ export default function EnrollView() {
 
   const resetCaptures = useCallback(() => {
     capturedRef.current = []
+    photoRef.current = null
     setCaptures([])
     setThumbs([])
     setPoseIdx(0)
@@ -168,7 +172,7 @@ export default function EnrollView() {
       const descriptors = capturedRef.current.map((d) => Array.from(d))
       await api<{ ok: boolean; count: number }>(`/api/students/${student.id}/face`, {
         method: 'POST',
-        body: { descriptors, consentVersion: 'v1' },
+        body: { descriptors, consentVersion: 'v1', photoData: photoRef.current ?? undefined },
       })
       toast.success('Face enrollment saved')
       back()
@@ -220,13 +224,21 @@ export default function EnrollView() {
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <span>
                   We store <strong className="text-foreground">a 128-number mathematical
-                  template</strong> computed from the face — <strong className="text-foreground">not
-                  photos</strong>. The camera feed never leaves this device.
+                  template</strong> computed from the face plus <strong className="text-foreground">one
+                  reference photo</strong> for identification. The live camera feed never
+                  leaves this device — only the final template and photo are saved.
                 </span>
               </li>
               <li className="flex gap-2.5">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <span>The template is used for one purpose only: marking attendance.</span>
+              </li>
+              <li className="flex gap-2.5">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <span>
+                  Each student&apos;s face can only be enrolled once — the system blocks
+                  duplicate enrollments of the same face.
+                </span>
               </li>
               <li className="flex gap-2.5">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -280,6 +292,7 @@ export default function EnrollView() {
         poseIdx={poseIdx}
         setPoseIdx={setPoseIdx}
         capturedRef={capturedRef}
+        photoRef={photoRef}
         setCaptures={setCaptures}
         setThumbs={setThumbs}
         onCancel={cancel}
@@ -304,10 +317,9 @@ export default function EnrollView() {
               >
                 <Check className="h-8 w-8" strokeWidth={3} />
               </motion.div>
-              <p className="mt-3 text-lg font-bold tracking-tight">All poses captured</p>
+              <p className="mt-3 text-lg font-bold tracking-tight">All {POSES.length} poses captured</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {captures.length} face template{captures.length === 1 ? '' : 's'} ready —
-                thumbnails are for reference only and are not uploaded.
+                The face template and one reference photo are ready to save.
               </p>
               {thumbs.length > 0 && (
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -406,6 +418,7 @@ interface CaptureStageProps {
   poseIdx: number
   setPoseIdx: (n: number) => void
   capturedRef: React.MutableRefObject<Float32Array[]>
+  photoRef: React.MutableRefObject<string | null>
   setCaptures: React.Dispatch<React.SetStateAction<Float32Array[]>>
   setThumbs: React.Dispatch<React.SetStateAction<string[]>>
   onCancel: () => void
@@ -417,6 +430,7 @@ function CaptureStage({
   poseIdx,
   setPoseIdx,
   capturedRef,
+  photoRef,
   setCaptures,
   setThumbs,
   onCancel,
@@ -509,28 +523,31 @@ function CaptureStage({
     }
   }, [engine, facing, retryKey])
 
-  const grabThumbnail = useCallback((video: HTMLVideoElement, face: FaceResult): string => {
-    const c = document.createElement('canvas')
-    c.width = THUMB_SIZE
-    c.height = THUMB_SIZE
-    const ctx = c.getContext('2d')
-    if (!ctx) return ''
-    // square crop around the face box with margin, mirrored for selfie view
-    const margin = 0.3
-    const size = Math.max(face.box.width, face.box.height) * (1 + margin * 2)
-    const cx = face.box.x + face.box.width / 2
-    const cy = face.box.y + face.box.height / 2
-    const sx = Math.max(0, cx - size / 2)
-    const sy = Math.max(0, cy - size / 2)
-    ctx.translate(THUMB_SIZE, 0)
-    ctx.scale(-1, 1)
-    ctx.drawImage(video, sx, sy, size, size, 0, 0, THUMB_SIZE, THUMB_SIZE)
-    try {
-      return c.toDataURL('image/jpeg', 0.72)
-    } catch {
-      return ''
-    }
-  }, [])
+  const grabFaceImage = useCallback(
+    (video: HTMLVideoElement, face: FaceResult, size: number, quality: number): string => {
+      const c = document.createElement('canvas')
+      c.width = size
+      c.height = size
+      const ctx = c.getContext('2d')
+      if (!ctx) return ''
+      // square crop around the face box with margin, mirrored for selfie view
+      const margin = 0.3
+      const crop = Math.max(face.box.width, face.box.height) * (1 + margin * 2)
+      const cx = face.box.x + face.box.width / 2
+      const cy = face.box.y + face.box.height / 2
+      const sx = Math.max(0, cx - crop / 2)
+      const sy = Math.max(0, cy - crop / 2)
+      ctx.translate(size, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(video, sx, sy, crop, crop, 0, 0, size, size)
+      try {
+        return c.toDataURL('image/jpeg', quality)
+      } catch {
+        return ''
+      }
+    },
+    []
+  )
 
   const captureCurrent = () => {
     const video = videoRef.current
@@ -541,7 +558,12 @@ function CaptureStage({
     capturedRef.current = [...capturedRef.current, face.descriptor]
     setCaptures([...capturedRef.current])
     setLocalCaptures([...capturedRef.current])
-    const thumb = grabThumbnail(video, face)
+    // straight pose → keep a larger reference photo for the student profile
+    if (currentPose === 0 && !photoRef.current) {
+      const photo = grabFaceImage(video, face, PHOTO_SIZE, 0.82)
+      if (photo) photoRef.current = photo
+    }
+    const thumb = grabFaceImage(video, face, THUMB_SIZE, 0.72)
     if (thumb) {
       setThumbs((prev) => [...prev, thumb])
       setLocalThumbs((prev) => [...prev, thumb])
@@ -597,7 +619,9 @@ function CaptureStage({
       if (!video || !canvas || video.readyState < 2) return
       busyRef.current = true
       void (async () => {
-        const face = await detectSingle(engine, video, 320)
+        // low-light lift: detect on an enhanced canvas when the room is dim
+        const { source } = enhanceForDetection(video)
+        const face = await detectSingle(engine, source, 320)
         if (!aliveRef.current) return
         const mirror = true // selfie preview is mirrored
         if (!face) {
@@ -761,7 +785,7 @@ function CaptureStage({
               <span className="h-11 w-11 rounded-lg border border-dashed border-white/20" />
             )}
             <span className="text-[10px] tabular-nums text-white/60">
-              {captures.length}/{POSES.length + 1}
+              {Math.min(poseIdx + 1, POSES.length)}/{POSES.length} poses
             </span>
           </div>
 

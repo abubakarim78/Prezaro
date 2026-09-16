@@ -1,0 +1,807 @@
+     1→'use client'
+     2→
+     3→// ============================================================
+     4→// Rollmark — Guided face enrollment
+     5→// consent → 3-pose guided capture (4 descriptors) → save.
+     6→// Full-screen, no app shell.
+     7→// ============================================================
+     8→
+     9→import { useCallback, useEffect, useRef, useState } from 'react'
+    10→import { motion } from 'framer-motion'
+    11→import { toast } from 'sonner'
+    12→import {
+    13→  CameraOff,
+    14→  Check,
+    15→  RefreshCw,
+    16→  ScanFace,
+    17→  ShieldCheck,
+    18→  SwitchCamera,
+    19→  WifiOff,
+    20→  X,
+    21→} from 'lucide-react'
+    22→
+    23→import { Button } from '@/components/ui/button'
+    24→import { Checkbox } from '@/components/ui/checkbox'
+    25→import {
+    26→  AlertDialog,
+    27→  AlertDialogContent,
+    28→  AlertDialogDescription,
+    29→  AlertDialogFooter,
+    30→  AlertDialogTitle,
+    31→} from '@/components/ui/alert-dialog'
+    32→
+    33→import { ApiError, api, getErrorMessage } from '@/lib/api'
+    34→import { useAppStore } from '@/lib/store'
+    35→import type { StudentDetail } from '@/lib/types'
+    36→import {
+    37→  detectSingle,
+    38→  drawOverlay,
+    39→  loadFaceEngine,
+    40→  noseOffset,
+    41→  startCamera,
+    42→  stopCamera,
+    43→  type FaceApi,
+    44→  type FaceResult,
+    45→} from '@/lib/face/engine'
+    46→
+    47→// ---------- Tunables ----------------------------------------
+    48→
+    49→const DETECT_INTERVAL_MS = 125 // ~8 fps
+    50→const SIZE_MIN = 0.25 // face width ≥ 25% of frame
+    51→const SIZE_MAX = 0.6 // face width ≤ 60% of frame
+    52→const CENTER_BAND = 0.15 // box centre within 15–85% of frame width
+    53→const STRAIGHT_TOL = 0.04
+    54→const TURN_MIN = 0.04
+    55→const TURN_MAX = 0.3
+    56→const NO_FACE_HINT_MS = 1800
+    57→const THUMB_SIZE = 96
+    58→const CONFIRM_DELAY_MS = 300
+    59→
+    60→const POSES: { label: string; hint: string; ok: (off: number) => boolean }[] = [
+    61→  {
+    62→    label: 'Look straight',
+    63→    hint: 'Face the camera directly',
+    64→    ok: (off) => Math.abs(off) < STRAIGHT_TOL,
+    65→  },
+    66→  {
+    67→    label: 'Turn slightly left',
+    68→    hint: 'A small turn to your left',
+    69→    ok: (off) => off >= TURN_MIN && off <= TURN_MAX,
+    70→  },
+    71→  {
+    72→    label: 'Turn slightly right',
+    73→    hint: 'A small turn to your right',
+    74→    ok: (off) => off <= -TURN_MIN && off >= -TURN_MAX,
+    75→  },
+    76→]
+    77→
+    78→// ============================================================
+    79→
+    80→export default function EnrollView() {
+    81→  const params = useAppStore((s) => s.params)
+    82→  const back = useAppStore((s) => s.back)
+    83→  const online = useAppStore((s) => s.online)
+    84→
+    85→  const studentIdParam = params.studentId ?? ''
+    86→  const [student, setStudent] = useState<StudentDetail | null>(null)
+    87→  const [studentError, setStudentError] = useState<string | null>(null)
+    88→  const [phase, setPhase] = useState<'loading' | 'consent' | 'capture' | 'save'>('loading')
+    89→  const [agreed, setAgreed] = useState(false)
+    90→  const [saving, setSaving] = useState(false)
+    91→  const [confirmCancel, setConfirmCancel] = useState(false)
+    92→
+    93→  // capture data lives here so both CaptureStage and the save screen see it
+    94→  const capturedRef = useRef<Float32Array[]>([])
+    95→  const [captures, setCaptures] = useState<Float32Array[]>([])
+    96→  const [thumbs, setThumbs] = useState<string[]>([])
+    97→  const [poseIdx, setPoseIdx] = useState(0)
+    98→
+    99→  // ---- fetch student (accepts DB id or student number) ----
+   100→  useEffect(() => {
+   101→    let alive = true
+   102→    const run = async () => {
+   103→      if (!studentIdParam) {
+   104→        setStudentError('No student selected')
+   105→        return
+   106→      }
+   107→      try {
+   108→        const d = await api<{ student: StudentDetail }>(`/api/students/${studentIdParam}`)
+   109→        if (!alive) return
+   110→        setStudent(d.student)
+   111→        setPhase('consent')
+   112→      } catch (e) {
+   113→        if (!alive) return
+   114→        if (e instanceof ApiError && e.status === 404) {
+   115→          // param may be a student number — resolve via query then fetch detail
+   116→          try {
+   117→            const q = await api<{ students: { id: string; studentId: string }[] }>(
+   118→              `/api/students?query=${encodeURIComponent(studentIdParam)}`
+   119→            )
+   120→            const match = q.students.find(
+   121→              (s) => s.id === studentIdParam || s.studentId === studentIdParam
+   122→            )
+   123→            if (match) {
+   124→              const d2 = await api<{ student: StudentDetail }>(`/api/students/${match.id}`)
+   125→              if (!alive) return
+   126→              setStudent(d2.student)
+   127→              setPhase('consent')
+   128→              return
+   129→            }
+   130→            setStudentError('Student not found')
+   131→            return
+   132→          } catch (e2) {
+   133→            if (!alive) return
+   134→            setStudentError(getErrorMessage(e2))
+   135→            return
+   136→          }
+   137→        }
+   138→        setStudentError(getErrorMessage(e))
+   139→      }
+   140→    }
+   141→    void run()
+   142→    return () => {
+   143→      alive = false
+   144→    }
+   145→  }, [studentIdParam])
+   146→
+   147→  const resetCaptures = useCallback(() => {
+   148→    capturedRef.current = []
+   149→    setCaptures([])
+   150→    setThumbs([])
+   151→    setPoseIdx(0)
+   152→  }, [])
+   153→
+   154→  const cancel = useCallback(() => {
+   155→    if (phase === 'capture' && capturedRef.current.length > 0) setConfirmCancel(true)
+   156→    else if (phase === 'save') back()
+   157→    else back()
+   158→  }, [phase, back])
+   159→
+   160→  const saveEnrollment = useCallback(async () => {
+   161→    if (!student) return
+   162→    if (!online) {
+   163→      toast.error('Face enrollment needs a connection')
+   164→      return
+   165→    }
+   166→    setSaving(true)
+   167→    try {
+   168→      const descriptors = capturedRef.current.map((d) => Array.from(d))
+   169→      await api<{ ok: boolean; count: number }>(`/api/students/${student.id}/face`, {
+   170→        method: 'POST',
+   171→        body: { descriptors, consentVersion: 'v1' },
+   172→      })
+   173→      toast.success('Face enrollment saved')
+   174→      back()
+   175→    } catch (e) {
+   176→      toast.error(getErrorMessage(e))
+   177→    } finally {
+   178→      setSaving(false)
+   179→    }
+   180→  }, [student, online, back])
+   181→
+   182→  // ---------- render ----------
+   183→
+   184→  if (phase === 'loading') {
+   185→    return (
+   186→      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+   187→        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+   188→          <ScanFace className="h-7 w-7" />
+   189→        </div>
+   190→        {studentError ? (
+   191→          <div className="w-full max-w-sm rounded-2xl border bg-card p-4">
+   192→            <p className="font-semibold">Couldn&apos;t load student</p>
+   193→            <p className="mt-1 text-sm text-muted-foreground">{studentError}</p>
+   194→            <Button variant="outline" className="mt-4 w-full" onClick={back}>
+   195→              Go back
+   196→            </Button>
+   197→          </div>
+   198→        ) : (
+   199→          <p className="text-sm text-muted-foreground">Loading student…</p>
+   200→        )}
+   201→      </div>
+   202→    )
+   203→  }
+   204→
+   205→  if (phase === 'consent' && student) {
+   206→    const fullName = `${student.firstName} ${student.lastName}`.trim()
+   207→    return (
+   208→      <div className="flex h-dvh flex-col bg-background">
+   209→        <EnrollHeader title="Face enrollment" subtitle={fullName} onCancel={cancel} />
+   210→        <main className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-6">
+   211→          <div className="mx-auto max-w-md rounded-2xl border bg-card p-6">
+   212→            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+   213→              <ShieldCheck className="h-6 w-6" />
+   214→            </div>
+   215→            <h2 className="mt-4 text-lg font-bold tracking-tight">
+   216→              Before we capture {student.firstName}&apos;s face
+   217→            </h2>
+   218→            <ul className="mt-3 space-y-3 text-sm text-muted-foreground">
+   219→              <li className="flex gap-2.5">
+   220→                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+   221→                <span>
+   222→                  We store <strong className="text-foreground">a 128-number mathematical
+   223→                  template</strong> computed from the face — <strong className="text-foreground">not
+   224→                  photos</strong>. The camera feed never leaves this device.
+   225→                </span>
+   226→              </li>
+   227→              <li className="flex gap-2.5">
+   228→                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+   229→                <span>The template is used for one purpose only: marking attendance.</span>
+   230→              </li>
+   231→              <li className="flex gap-2.5">
+   232→                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+   233→                <span>The lecturer can delete it at any time from the student profile.</span>
+   234→              </li>
+   235→              <li className="flex gap-2.5">
+   236→                <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+   237→                <span>
+   238→                  Opting out is never penalised — the lecturer can always mark a
+   239→                  student present manually during review.
+   240→                </span>
+   241→              </li>
+   242→            </ul>
+   243→
+   244→            <label
+   245→              htmlFor="consent-check"
+   246→              className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border bg-background/50 p-3.5"
+   247→            >
+   248→              <Checkbox
+   249→                id="consent-check"
+   250→                checked={agreed}
+   251→                onCheckedChange={(v) => setAgreed(v === true)}
+   252→                className="mt-0.5"
+   253→              />
+   254→              <span className="text-sm font-medium leading-snug">
+   255→                I agree to enroll this face template for attendance (consent v1)
+   256→              </span>
+   257→            </label>
+   258→          </div>
+   259→        </main>
+   260→        <footer
+   261→          className="border-t bg-card px-4"
+   262→          style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
+   263→        >
+   264→          <Button
+   265→            className="h-12 w-full text-base font-semibold"
+   266→            disabled={!agreed}
+   267→            onClick={() => setPhase('capture')}
+   268→          >
+   269→            Continue to capture
+   270→          </Button>
+   271→        </footer>
+   272→      </div>
+   273→    )
+   274→  }
+   275→
+   276→  if (phase === 'capture' && student) {
+   277→    return (
+   278→      <CaptureStage
+   279→        student={student}
+   280→        poseIdx={poseIdx}
+   281→        setPoseIdx={setPoseIdx}
+   282→        capturedRef={capturedRef}
+   283→        setCaptures={setCaptures}
+   284→        setThumbs={setThumbs}
+   285→        onCancel={cancel}
+   286→        onDone={() => setPhase('save')}
+   287→      />
+   288→    )
+   289→  }
+   290→
+   291→  if (phase === 'save' && student) {
+   292→    const fullName = `${student.firstName} ${student.lastName}`.trim()
+   293→    return (
+   294→      <div className="flex h-dvh flex-col bg-background">
+   295→        <EnrollHeader title="Review & save" subtitle={fullName} onCancel={cancel} />
+   296→        <main className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-6">
+   297→          <div className="mx-auto max-w-md space-y-4 pt-2">
+   298→            <div className="rounded-2xl border bg-card p-6 text-center">
+   299→              <motion.div
+   300→                initial={{ scale: 0.6, opacity: 0 }}
+   301→                animate={{ scale: 1, opacity: 1 }}
+   302→                transition={{ type: 'spring', stiffness: 320, damping: 20 }}
+   303→                className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground"
+   304→              >
+   305→                <Check className="h-8 w-8" strokeWidth={3} />
+   306→              </motion.div>
+   307→              <p className="mt-3 text-lg font-bold tracking-tight">All poses captured</p>
+   308→              <p className="mt-1 text-sm text-muted-foreground">
+   309→                {captures.length} face template{captures.length === 1 ? '' : 's'} ready —
+   310→                thumbnails are for reference only and are not uploaded.
+   311→              </p>
+   312→              {thumbs.length > 0 && (
+   313→                <div className="mt-4 flex flex-wrap justify-center gap-2">
+   314→                  {thumbs.map((src, i) => (
+   315→                     
+   316→                    <img
+   317→                      key={i}
+   318→                      src={src}
+   319→                      alt={`Captured pose ${i + 1}`}
+   320→                      className="h-16 w-16 rounded-xl border object-cover"
+   321→                    />
+   322→                  ))}
+   323→                </div>
+   324→              )}
+   325→            </div>
+   326→
+   327→            {!online && (
+   328→              <div className="flex items-start gap-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-sm text-amber-700 dark:text-amber-400">
+   329→                <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
+   330→                <span>
+   331→                  Face enrollment needs a connection — reconnect to save the templates.
+   332→                </span>
+   333→              </div>
+   334→            )}
+   335→          </div>
+   336→        </main>
+   337→        <footer
+   338→          className="border-t bg-card px-4"
+   339→          style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
+   340→        >
+   341→          <div className="mx-auto flex max-w-md gap-2">
+   342→            <Button
+   343→              variant="outline"
+   344→              className="h-12 flex-1"
+   345→              onClick={() => {
+   346→                resetCaptures()
+   347→                setPhase('capture')
+   348→              }}
+   349→              disabled={saving}
+   350→            >
+   351→              Retake
+   352→            </Button>
+   353→            <Button
+   354→              className="h-12 flex-[2] text-base font-semibold"
+   355→              onClick={() => void saveEnrollment()}
+   356→              disabled={saving || !online || captures.length === 0}
+   357→            >
+   358→              {saving ? 'Saving…' : 'Save enrollment'}
+   359→            </Button>
+   360→          </div>
+   361→        </footer>
+   362→      </div>
+   363→    )
+   364→  }
+   365→
+   366→  return null
+   367→}
+   368→
+   369→// ---------- header ----------
+   370→
+   371→function EnrollHeader({
+   372→  title,
+   373→  subtitle,
+   374→  onCancel,
+   375→}: {
+   376→  title: string
+   377→  subtitle: string
+   378→  onCancel: () => void
+   379→}) {
+   380→  return (
+   381→    <header
+   382→      className="flex items-center gap-3 px-4"
+   383→      style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)', paddingBottom: 10 }}
+   384→    >
+   385→      <Button
+   386→        variant="ghost"
+   387→        size="icon"
+   388→        className="size-9"
+   389→        onClick={onCancel}
+   390→        aria-label="Cancel enrollment"
+   391→      >
+   392→        <X className="h-5 w-5" />
+   393→      </Button>
+   394→      <div className="min-w-0">
+   395→        <h1 className="text-lg font-bold tracking-tight">{title}</h1>
+   396→        <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+   397→      </div>
+   398→    </header>
+   399→  )
+   400→}
+   401→
+   402→// ---------- capture stage ----------
+   403→
+   404→interface CaptureStageProps {
+   405→  student: StudentDetail
+   406→  poseIdx: number
+   407→  setPoseIdx: (n: number) => void
+   408→  capturedRef: React.MutableRefObject<Float32Array[]>
+   409→  setCaptures: React.Dispatch<React.SetStateAction<Float32Array[]>>
+   410→  setThumbs: React.Dispatch<React.SetStateAction<string[]>>
+   411→  onCancel: () => void
+   412→  onDone: () => void
+   413→}
+   414→
+   415→function CaptureStage({
+   416→  student,
+   417→  poseIdx,
+   418→  setPoseIdx,
+   419→  capturedRef,
+   420→  setCaptures,
+   421→  setThumbs,
+   422→  onCancel,
+   423→  onDone,
+   424→}: CaptureStageProps) {
+   425→  const [engine, setEngine] = useState<FaceApi | null>(null)
+   426→  const [engineStage, setEngineStage] = useState('Loading face engine…')
+   427→  const [facing, setFacing] = useState<'user' | 'environment'>('user')
+   428→  const [cameraState, setCameraState] = useState<'starting' | 'ready' | 'error'>('starting')
+   429→  const [cameraError, setCameraError] = useState('')
+   430→  const [retryKey, setRetryKey] = useState(0)
+   431→  const [poseOk, setPoseOk] = useState(false)
+   432→  const [faceMissing, setFaceMissing] = useState(false)
+   433→  const [confirming, setConfirming] = useState(false)
+   434→  const [captures, setLocalCaptures] = useState<Float32Array[]>([])
+   435→  const [thumbs, setLocalThumbs] = useState<string[]>([])
+   436→
+   437→  const videoRef = useRef<HTMLVideoElement | null>(null)
+   438→  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+   439→  const streamRef = useRef<MediaStream | null>(null)
+   440→  const lastFaceRef = useRef<FaceResult | null>(null)
+   441→  const lastSeenAtRef = useRef(0)
+   442→  const poseIdxRef = useRef(poseIdx)
+   443→  const busyRef = useRef(false)
+   444→  const aliveRef = useRef(true)
+   445→  const engineRef = useRef<FaceApi | null>(null)
+   446→
+   447→  useEffect(() => {
+   448→    engineRef.current = engine
+   449→  }, [engine])
+   450→  useEffect(() => {
+   451→    poseIdxRef.current = poseIdx
+   452→  }, [poseIdx])
+   453→
+   454→  // load engine
+   455→  useEffect(() => {
+   456→    let alive = true
+   457→    loadFaceEngine((s) => {
+   458→      if (alive) setEngineStage(s)
+   459→    })
+   460→      .then((f) => {
+   461→        if (alive) setEngine(f)
+   462→      })
+   463→      .catch((e) => {
+   464→        if (alive) {
+   465→          setEngineStage('')
+   466→          setCameraError(getErrorMessage(e))
+   467→          setCameraState('error')
+   468→        }
+   469→      })
+   470→    return () => {
+   471→      alive = false
+   472→    }
+   473→  }, [])
+   474→
+   475→  // camera
+   476→  useEffect(() => {
+   477→    if (!engine) return
+   478→    let cancelled = false
+   479→    let localStream: MediaStream | null = null
+   480→    const video = videoRef.current
+   481→    if (!video) return
+   482→
+   483→    // defer status update out of the synchronous effect body
+   484→    Promise.resolve().then(() => {
+   485→      if (!cancelled) setCameraState('starting')
+   486→    })
+   487→    startCamera(video, facing)
+   488→      .then((s) => {
+   489→        if (cancelled) {
+   490→          stopCamera(s)
+   491→          return
+   492→        }
+   493→        localStream = s
+   494→        streamRef.current = s
+   495→        setCameraState('ready')
+   496→      })
+   497→      .catch((e) => {
+   498→        if (cancelled) return
+   499→        setCameraError(getErrorMessage(e))
+   500→        setCameraState('error')
+   501→      })
+   502→
+   503→    return () => {
+   504→      cancelled = true
+   505→      if (localStream) {
+   506→        stopCamera(localStream, videoRef.current)
+   507→        if (streamRef.current === localStream) streamRef.current = null
+   508→      }
+   509→    }
+   510→  }, [engine, facing, retryKey])
+   511→
+   512→  const grabThumbnail = useCallback((video: HTMLVideoElement, face: FaceResult): string => {
+   513→    const c = document.createElement('canvas')
+   514→    c.width = THUMB_SIZE
+   515→    c.height = THUMB_SIZE
+   516→    const ctx = c.getContext('2d')
+   517→    if (!ctx) return ''
+   518→    // square crop around the face box with margin, mirrored for selfie view
+   519→    const margin = 0.3
+   520→    const size = Math.max(face.box.width, face.box.height) * (1 + margin * 2)
+   521→    const cx = face.box.x + face.box.width / 2
+   522→    const cy = face.box.y + face.box.height / 2
+   523→    const sx = Math.max(0, cx - size / 2)
+   524→    const sy = Math.max(0, cy - size / 2)
+   525→    ctx.translate(THUMB_SIZE, 0)
+   526→    ctx.scale(-1, 1)
+   527→    ctx.drawImage(video, sx, sy, size, size, 0, 0, THUMB_SIZE, THUMB_SIZE)
+   528→    try {
+   529→      return c.toDataURL('image/jpeg', 0.72)
+   530→    } catch {
+   531→      return ''
+   532→    }
+   533→  }, [])
+   534→
+   535→  const captureCurrent = () => {
+   536→    const video = videoRef.current
+   537→    const face = lastFaceRef.current
+   538→    if (!video || !face || busyRef.current) return
+   539→    const currentPose = poseIdxRef.current
+   540→    busyRef.current = true
+   541→    capturedRef.current = [...capturedRef.current, face.descriptor]
+   542→    setCaptures([...capturedRef.current])
+   543→    setLocalCaptures([...capturedRef.current])
+   544→    const thumb = grabThumbnail(video, face)
+   545→    if (thumb) {
+   546→      setThumbs((prev) => [...prev, thumb])
+   547→      setLocalThumbs((prev) => [...prev, thumb])
+   548→    }
+   549→    navigator.vibrate?.(40)
+   550→
+   551→    const advance = () => {
+   552→      busyRef.current = false
+   553→      setConfirming(false)
+   554→      setPoseOk(false)
+   555→      if (currentPose + 1 >= POSES.length) onDone()
+   556→      else setPoseIdx(currentPose + 1)
+   557→    }
+   558→
+   559→    if (currentPose === 0) {
+   560→      // straight pose → grab one extra confirm descriptor 300 ms later (4 total)
+   561→      setConfirming(true)
+   562→      setTimeout(async () => {
+   563→        try {
+   564→          const v = videoRef.current
+   565→          if (v && aliveRef.current && engineRef.current) {
+   566→            const again = await detectSingle(engineRef.current, v)
+   567→            if (again && aliveRef.current) {
+   568→              capturedRef.current = [...capturedRef.current, again.descriptor]
+   569→              setCaptures([...capturedRef.current])
+   570→              setLocalCaptures([...capturedRef.current])
+   571→            }
+   572→          }
+   573→        } catch {
+   574→          /* best-effort confirm */
+   575→        }
+   576→        advance()
+   577→      }, CONFIRM_DELAY_MS)
+   578→    } else {
+   579→      advance()
+   580→    }
+   581→  }
+   582→
+   583→  // detection loop
+   584→  useEffect(() => {
+   585→    aliveRef.current = true
+   586→    if (!engine || cameraState !== 'ready') return
+   587→    let raf = 0
+   588→    let last = 0
+   589→
+   590→    const tick = (t: number) => {
+   591→      raf = requestAnimationFrame(tick)
+   592→      if (t - last < DETECT_INTERVAL_MS) return
+   593→      last = t
+   594→      if (busyRef.current) return
+   595→      const video = videoRef.current
+   596→      const canvas = canvasRef.current
+   597→      if (!video || !canvas || video.readyState < 2) return
+   598→      busyRef.current = true
+   599→      void (async () => {
+   600→        const face = await detectSingle(engine, video, 320)
+   601→        if (!aliveRef.current) return
+   602→        const mirror = true // selfie preview is mirrored
+   603→        if (!face) {
+   604→          drawOverlay(canvas, video, [], [], { mirror })
+   605→          lastFaceRef.current = null
+   606→          setFaceMissing(Date.now() - lastSeenAtRef.current > NO_FACE_HINT_MS)
+   607→          setPoseOk(false)
+   608→          return
+   609→        }
+   610→        lastFaceRef.current = face
+   611→        lastSeenAtRef.current = Date.now()
+   612→        setFaceMissing(false)
+   613→
+   614→        const vw = video.videoWidth || 1
+   615→        const off = noseOffset(face)
+   616→        const sizeOk = face.box.width >= SIZE_MIN * vw && face.box.width <= SIZE_MAX * vw
+   617→        const centerX = face.box.x + face.box.width / 2
+   618→        const centered = centerX >= CENTER_BAND * vw && centerX <= (1 - CENTER_BAND) * vw
+   619→        const angleOk = POSES[poseIdxRef.current].ok(off)
+   620→        const ok = sizeOk && centered && angleOk
+   621→        setPoseOk(ok)
+   622→        drawOverlay(
+   623→          canvas,
+   624→          video,
+   625→          [face],
+   626→          [ok ? { id: 'ok', name: '', distance: 0 } : null],
+   627→          { mirror }
+   628→        )
+   629→      })()
+   630→        .catch(() => {})
+   631→        .finally(() => {
+   632→          busyRef.current = false
+   633→        })
+   634→    }
+   635→    raf = requestAnimationFrame(tick)
+   636→    return () => {
+   637→      aliveRef.current = false
+   638→      cancelAnimationFrame(raf)
+   639→    }
+   640→  }, [engine, cameraState])
+   641→
+   642→  // cleanup
+   643→  useEffect(() => {
+   644→    return () => {
+   645→      aliveRef.current = false
+   646→      stopCamera(streamRef.current, videoRef.current)
+   647→      streamRef.current = null
+   648→    }
+   649→  }, [])
+   650→
+   651→  const pose = POSES[poseIdx]
+   652→  const mirror = facing === 'user'
+   653→
+   654→  return (
+   655→    <div className="flex h-dvh flex-col bg-black text-white">
+   656→      <header
+   657→        className="flex items-center gap-3 bg-black/80 px-3"
+   658→        style={{ paddingTop: 'max(env(safe-area-inset-top), 10px)', paddingBottom: 10 }}
+   659→      >
+   660→        <Button
+   661→          variant="ghost"
+   662→          size="icon"
+   663→          className="size-10 shrink-0 text-white hover:bg-white/15"
+   664→          onClick={onCancel}
+   665→          aria-label="Cancel enrollment"
+   666→        >
+   667→          <X className="h-5 w-5" />
+   668→        </Button>
+   669→        <div className="min-w-0">
+   670→          <p className="truncate font-semibold">{`Enroll ${student.firstName} ${student.lastName}`}</p>
+   671→          <p className="text-xs tabular-nums text-white/60">
+   672→            {student.studentId} · pose {poseIdx + 1} of {POSES.length}
+   673→          </p>
+   674→        </div>
+   675→      </header>
+   676→
+   677→      {/* video area */}
+   678→      <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
+   679→        <video
+   680→          ref={videoRef}
+   681→          className="absolute inset-0 h-full w-full object-cover"
+   682→          style={{ transform: mirror ? 'scaleX(-1)' : undefined }}
+   683→          playsInline
+   684→          muted
+   685→          autoPlay
+   686→        />
+   687→        <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+   688→
+   689→        {cameraState === 'starting' && (
+   690→          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
+   691→            <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+   692→            <p className="text-sm text-white/80">{engineStage || 'Starting camera…'}</p>
+   693→          </div>
+   694→        )}
+   695→
+   696→        {cameraState === 'error' && (
+   697→          <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 p-6">
+   698→            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
+   699→              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+   700→                <CameraOff className="h-6 w-6" />
+   701→              </div>
+   702→              <p className="mt-3 font-semibold">Camera unavailable</p>
+   703→              <p className="mt-1 text-sm text-white/70">
+   704→                {cameraError || 'Check the browser permission and try again.'}
+   705→              </p>
+   706→              <div className="mt-4 flex flex-col gap-2">
+   707→                <Button
+   708→                  className="h-11"
+   709→                  onClick={() => {
+   710→                    setCameraError('')
+   711→                    setCameraState('starting')
+   712→                    setRetryKey((k) => k + 1)
+   713→                  }}
+   714→                >
+   715→                  <RefreshCw className="h-4 w-4" /> Retry
+   716→                </Button>
+   717→                <Button
+   718→                  variant="outline"
+   719→                  className="h-11 border-white/20 bg-transparent text-white hover:bg-white/10"
+   720→                  onClick={onCancel}
+   721→                >
+   722→                  Cancel
+   723→                </Button>
+   724→              </div>
+   725→            </div>
+   726→          </div>
+   727→        )}
+   728→
+   729→        {cameraState === 'ready' && (
+   730→          <div className="absolute inset-x-0 top-0 flex flex-col items-center gap-1.5 bg-gradient-to-b from-black/70 to-transparent px-6 pb-10 pt-4 text-center">
+   731→            <p className="text-xl font-bold tracking-tight">{pose.label}</p>
+   732→            <p className="text-sm text-white/75">{pose.hint}</p>
+   733→            {confirming && (
+   734→              <motion.p
+   735→                initial={{ opacity: 0 }}
+   736→                animate={{ opacity: 1 }}
+   737→                className="mt-1 rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-300"
+   738→              >
+   739→                Hold still — confirming…
+   740→              </motion.p>
+   741→            )}
+   742→          </div>
+   743→        )}
+   744→      </div>
+   745→
+   746→      {/* bottom controls */}
+   747→      <footer
+   748→        className="bg-black/90"
+   749→        style={{ paddingTop: 14, paddingBottom: 'max(env(safe-area-inset-bottom), 14px)' }}
+   750→      >
+   751→        <div className="mx-auto flex max-w-md items-center justify-between gap-4 px-6">
+   752→          <div className="flex w-16 flex-col items-center gap-1">
+   753→            {thumbs.length > 0 ? (
+   754→               
+   755→              <img
+   756→                src={thumbs[thumbs.length - 1]}
+   757→                alt="Last captured pose"
+   758→                className="h-11 w-11 rounded-lg border border-white/20 object-cover"
+   759→              />
+   760→            ) : (
+   761→              <span className="h-11 w-11 rounded-lg border border-dashed border-white/20" />
+   762→            )}
+   763→            <span className="text-[10px] tabular-nums text-white/60">
+   764→              {captures.length}/{POSES.length + 1}
+   765→            </span>
+   766→          </div>
+   767→
+   768→          <div className="flex flex-col items-center gap-2">
+   769→            <button
+   770→              type="button"
+   771→              onClick={captureCurrent}
+   772→              disabled={!poseOk || confirming || cameraState !== 'ready'}
+   773→              aria-label="Capture pose"
+   774→              className={`flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 transition-all disabled:opacity-40 ${
+   775→                poseOk
+   776→                  ? 'border-emerald-400 bg-emerald-500 shadow-lg shadow-emerald-500/40'
+   777→                  : 'border-white/40 bg-white/10'
+   778→              }`}
+   779→            >
+   780→              <ScanFace className={`h-8 w-8 ${poseOk ? 'text-emerald-950' : 'text-white/70'}`} />
+   781→            </button>
+   782→            <p aria-live="polite" className="h-4 text-xs text-white/70">
+   783→              {faceMissing && cameraState === 'ready'
+   784→                ? 'No face — move closer / better lighting'
+   785→                : poseOk
+   786→                  ? 'Perfect — tap capture'
+   787→                  : ''}
+   788→            </p>
+   789→          </div>
+   790→
+   791→          <div className="flex w-16 justify-end">
+   792→            <Button
+   793→              variant="ghost"
+   794→              size="icon"
+   795→              className="size-11 text-white hover:bg-white/15"
+   796→              onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
+   797→              aria-label="Flip camera"
+   798→            >
+   799→              <SwitchCamera className="h-5 w-5" />
+   800→            </Button>
+   801→          </div>
+   802→        </div>
+   803→      </footer>
+   804→    </div>
+   805→  )
+   806→}
+   807→

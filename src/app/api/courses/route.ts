@@ -28,6 +28,7 @@ const createCourseSchema = z.object({
   title: z.string().trim().min(1, 'Course title is required'),
   level: z.coerce.number().int().min(100).max(900).default(200),
   semester: z.coerce.number().int().min(1).max(3).default(1),
+  termSystem: z.enum(['SEMESTER', 'TRIMESTER']).default('SEMESTER'),
 })
 
 export async function POST(req: Request) {
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     }
     const parsed = createCourseSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
-    const { code, title, level, semester } = parsed.data
+    const { code, title, level, semester, termSystem } = parsed.data
 
     const existing = await db.course.findUnique({
       where: { code_departmentId: { code, departmentId: user.departmentId } },
@@ -53,6 +54,7 @@ export async function POST(req: Request) {
         title,
         level,
         semester,
+        termSystem,
         departmentId: user.departmentId,
         lecturerId: user.id,
       },

@@ -1,13 +1,12 @@
 // ============================================================
 // Rollmark — per-user app settings (stored as JSON on User)
-// Defaults: { atRiskThreshold: 75, liveness: true, defaultMode: 'WALKTHROUGH' }
+// Defaults: { atRiskThreshold: 75, defaultMode: 'WALKTHROUGH' }
 // ============================================================
 import { db } from '@/lib/db'
 import type { AppSettings } from '@/lib/types'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   atRiskThreshold: 75,
-  liveness: true,
   defaultMode: 'WALKTHROUGH',
 }
 
@@ -25,7 +24,6 @@ export function parseSettings(raw: string | null | undefined): AppSettings {
     const o = obj as Record<string, unknown>
     return {
       atRiskThreshold: clampNumber(o.atRiskThreshold, 1, 100, DEFAULT_SETTINGS.atRiskThreshold),
-      liveness: typeof o.liveness === 'boolean' ? o.liveness : DEFAULT_SETTINGS.liveness,
       defaultMode: o.defaultMode === 'KIOSK' ? 'KIOSK' : 'WALKTHROUGH',
     }
   } catch {

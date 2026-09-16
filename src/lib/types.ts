@@ -7,6 +7,7 @@ export type Role = 'LECTURER' | 'ADMIN'
 export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
+export type TermSystem = 'SEMESTER' | 'TRIMESTER'
 
 export interface User {
   id: string
@@ -30,8 +31,19 @@ export interface Course {
   code: string
   title: string
   level: number
-  semester: number
+  semester: number // 1..3
+  termSystem: TermSystem
   studentCount: number
+}
+
+/** Human label for a course term, e.g. "Trimester 2" / "Semester 1". */
+export function termLabel(c: Pick<Course, 'semester' | 'termSystem'>): string {
+  return `${c.termSystem === 'TRIMESTER' ? 'Trimester' : 'Semester'} ${c.semester}`
+}
+
+/** Short badge label, e.g. "T2" / "S1". */
+export function termBadge(c: Pick<Course, 'semester' | 'termSystem'>): string {
+  return `${c.termSystem === 'TRIMESTER' ? 'T' : 'S'}${c.semester}`
 }
 
 export interface StudentListItem {
@@ -49,6 +61,7 @@ export interface StudentListItem {
 export interface StudentDetail extends StudentListItem {
   courses: { id: string; code: string; title: string }[]
   descriptorsCount: number
+  photoData?: string | null
   attendance: { present: number; late: number; total: number; percent: number }
 }
 
@@ -133,7 +146,6 @@ export interface DepartmentReport {
 
 export interface AppSettings {
   atRiskThreshold: number // % below which a student is flagged at-risk
-  liveness: boolean // require head-turn challenge in kiosk mode
   defaultMode: 'WALKTHROUGH' | 'KIOSK'
 }
 

@@ -16,6 +16,7 @@ const updateCourseSchema = z.object({
   title: z.string().trim().min(1, 'Course title is required').optional(),
   level: z.coerce.number().int().min(100).max(900).optional(),
   semester: z.coerce.number().int().min(1).max(3).optional(),
+  termSystem: z.enum(['SEMESTER', 'TRIMESTER']).optional(),
 })
 
 export async function PATCH(

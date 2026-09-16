@@ -13,7 +13,6 @@ export async function GET(req: Request) {
 
 const putSchema = z.object({
   atRiskThreshold: z.number().int().min(1).max(100).optional(),
-  liveness: z.boolean().optional(),
   defaultMode: z.enum(['WALKTHROUGH', 'KIOSK']).optional(),
 })
 

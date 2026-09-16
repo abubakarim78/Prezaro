@@ -16,7 +16,8 @@ import {
 import { toast } from 'sonner'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
-import type { Course, CoursesResponse, DepartmentsResponse, User } from '@/lib/types'
+import type { Course, CoursesResponse, DepartmentsResponse, TermSystem, User } from '@/lib/types'
+import { termBadge } from '@/lib/types'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +41,22 @@ interface PendingCourse {
   title: string
   level: number
   semester: number
+  termSystem: TermSystem
+}
+
+/** Term select values: S1/S2 = semesters, T1/T2/T3 = trimesters. */
+const TERM_OPTIONS: { value: string; label: string }[] = [
+  { value: 'S1', label: 'Semester 1' },
+  { value: 'S2', label: 'Semester 2' },
+  { value: 'T1', label: 'Trimester 1' },
+  { value: 'T2', label: 'Trimester 2' },
+  { value: 'T3', label: 'Trimester 3' },
+]
+
+function parseTerm(value: string): { semester: number; termSystem: TermSystem } {
+  const trimester = value.startsWith('T')
+  const n = Number(value.slice(1)) || 1
+  return { semester: n, termSystem: trimester ? 'TRIMESTER' : 'SEMESTER' }
 }
 
 export default function OnboardingView() {
@@ -71,7 +88,7 @@ export default function OnboardingView() {
   const [cCode, setCCode] = useState('')
   const [cTitle, setCTitle] = useState('')
   const [cLevel, setCLevel] = useState<string>('100')
-  const [cSemester, setCSemester] = useState<string>('1')
+  const [cTerm, setCTerm] = useState<string>('S1')
 
   // Finish
   const [finishing, setFinishing] = useState(false)
@@ -121,19 +138,21 @@ export default function OnboardingView() {
 
   const addCourse = () => {
     if (!canAddCourse) return
+    const { semester, termSystem } = parseTerm(cTerm)
     setPendingCourses((p) => [
       ...p,
       {
         code: cCode.trim().toUpperCase(),
         title: cTitle.trim(),
         level: Number(cLevel) || 100,
-        semester: Number(cSemester) || 1,
+        semester,
+        termSystem,
       },
     ])
     setCCode('')
     setCTitle('')
     setCLevel('100')
-    setCSemester('1')
+    setCTerm('S1')
     setAddOpen(false)
     toast.success('Course added to your profile')
   }
@@ -509,14 +528,17 @@ export default function OnboardingView() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="nc-sem">Semester</Label>
-                        <Select value={cSemester} onValueChange={setCSemester}>
-                          <SelectTrigger id="nc-sem" className="h-11 w-full">
+                        <Label htmlFor="nc-term">Term</Label>
+                        <Select value={cTerm} onValueChange={setCTerm}>
+                          <SelectTrigger id="nc-term" className="h-11 w-full">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="1">Semester 1</SelectItem>
-                            <SelectItem value="2">Semester 2</SelectItem>
+                            {TERM_OPTIONS.map((t) => (
+                              <SelectItem key={t.value} value={t.value}>
+                                {t.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -631,6 +653,9 @@ function Chips({
           <span className="max-w-40 truncate text-muted-foreground">{c.title}</span>
           <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">
             L{c.level}
+          </span>
+          <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">
+            {termBadge(c)}
           </span>
         </span>
       ))}

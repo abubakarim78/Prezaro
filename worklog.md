@@ -295,3 +295,28 @@ Stage Summary:
 - Blink: 4.2s loop, ~0.27s blink motion (natural human blink range).
 - "New course" now opens directly on the courses step with Level (100–600) + Semester visible — no more re-walking the wizard.
 - Level 600 available in course creation, add-student, and edit-student forms.
+
+---
+Task ID: 21
+Agent: Z.ai Code (main)
+Task: Trimester options; "3 pictures vs 4" copy; post-enroll "Student not found"; low-light capture; biometric dedup (same face enrolled twice); store reference photo; single-capture verification (no head turns).
+
+Work Log:
+- store.ts: history now stores {view, params}; back() restores both. Fixes "Student not found" after returning from enrollment (and all other params-dependent back navigation).
+- Prisma: Course.termSystem ("SEMESTER"|"TRIMESTER") + Student.photoData (JPEG data URL) → db:push. SPS 201 defaults to SEMESTER/1 (backward compatible). Dev server restarted so Prisma Client picks up new columns (stale client caused 500 "Unknown argument photoData").
+- Terms: types.ts TermSystem + termLabel/termBadge helpers; courseDTO + create/update course schemas accept termSystem; onboarding Term select offers Semester 1/2 AND Trimester 1/2/3 (S1/S2/T1/T2/T3 values, parseTerm helper); course chips show L{level} + T2/S1 badge.
+- Biometric dedup (face route POST): compares every incoming descriptor against ALL other enrolled students in the department (euclidean ≤ 0.48) → 409 "This face is already enrolled for <name> (<id>)". Verified via API: same-face second enrollment → 409; different face → 200.
+- match.ts bestMatch: tracks second-closest DIFFERENT student; new {margin} option rejects ambiguous matches (both within threshold AND within margin 0.04). Verified: exact → match; equidistant probe → REJECTED (previously arbitrarily picked one); far → null.
+- scan.tsx: thresholds tightened (walkthrough 0.5→0.48, kiosk 0.45→0.42) + MATCH_MARGIN 0.04; kiosk challenge (head-turn) REMOVED — single frontal capture now checks the student in (kioskCelebrate on first match); liveness setting removed from AppSettings/settings lib/settings route/settings UI; KioskOverlay challenge block deleted; kioskIdle/msgTimerRef/CHALLENGE_MS/TURN_OFFSET/noseOffset-in-scan/ArrowLeft/ArrowRight cleaned.
+- engine.ts: startCamera applies best-effort low-light constraints (exposureMode continuous, exposureCompensation +2, whiteBalance continuous) via applyConstraints; enhanceForDetection(video) — samples 80px-wide luminance, if mean < 108/255 applies adaptive gamma (target mean 0.46, gamma ≤ 2.8) through 256-entry LUT on a full-frame canvas used as detector input + CSS brightness/contrast preview boost (≤2.3×); detectSingle/detectAll accept HTMLCanvasElement; enroll + scan loops feed enhanced source; overlay mapping unchanged (canvas dims = video dims).
+- Reference photo: enroll grabs 320px face crop (q0.82) on the straight pose → photoRef → POST body photoData → stored on Student → shown in student profile Face enrollment section ("Reference photo on file"); face DELETE wipes photo; consent text updated (template + one reference photo, duplicate-enrollment notice).
+- Copy: capture counter now "pose x/3 poses" (was descriptor count "/4"); save screen "All 3 poses captured — the face template and one reference photo are ready to save."
+- student.tsx: 404 fallback resolves matric-number params (e.g. PHA/0001/26 from admin panel) via /api/students?query before showing "not found"; removeFace uses resolved DB id.
+- E2E (agent-browser): term dropdown shows Semester 1/2 + Trimester 1/2/3 (screenshot); student detail → Enroll face → cancel → returns to student detail (params fix verified). Dedup + margin + photo storage verified via API tests.
+- Cleanup: TST test students deleted; admin reset to onboarded=false/departmentId=null. User's lecturer account, PAHM dept, SPS 201 untouched. Lint + tsc clean; dev.log 200s only.
+
+Stage Summary:
+- One face can no longer be enrolled twice (409 with the other student's name) and cannot verify as two students (ambiguity margin).
+- Verification is now single-capture: first matching frame checks the student in — no head-turning.
+- Dim lecture halls: camera exposure boost + adaptive gamma enhancement before detection, preview brightened to match.
+- Courses support Semester 1/2 and Trimester 1/2/3; enrollment stores a reference photo shown on the student profile; "3 poses vs 4" counter fixed; back-navigation params fixed.

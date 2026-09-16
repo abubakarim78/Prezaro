@@ -99,6 +99,7 @@ export function courseDTO(c: Course & { _count: { enrollments: number } }): Cour
     title: c.title,
     level: c.level,
     semester: c.semester,
+    termSystem: c.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
     studentCount: c._count.enrollments,
   }
 }
@@ -157,6 +158,7 @@ export function studentDetailDTO(
     ...base,
     courses,
     descriptorsCount: parseDescriptorJson(s.descriptorsJson).length,
+    photoData: s.photoData ?? null,
     attendance: { present, late, total, percent },
   }
 }

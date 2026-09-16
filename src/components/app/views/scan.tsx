@@ -3,7 +3,7 @@
 // ============================================================
 // Rollmark — Scan view (the hero screen)
 // select → loading → live. Full-screen, no app shell.
-// Face check-ins — walkthrough or kiosk, with optional liveness.
+// Face check-ins — walkthrough or kiosk, single-capture verification.
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -11,8 +11,6 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
-  ArrowLeft,
-  ArrowRight,
   CameraOff,
   Check,
   LogOut,
@@ -70,8 +68,8 @@ import {
   detectAll,
   detectSingle,
   drawOverlay,
+  enhanceForDetection,
   loadFaceEngine,
-  noseOffset,
   startCamera,
   stopCamera,
   type FaceApi,
@@ -81,11 +79,14 @@ import {
 // ---------- Tunables ----------------------------------------
 
 const DETECT_INTERVAL_MS = 166 // ~6 fps
-const WALKTHROUGH_THRESHOLD = 0.5
-const KIOSK_THRESHOLD = 0.45
+// Thresholds: face-api same-person distances sit ~0.30–0.45, different
+// people ~0.52+. Kiosk (one-at-a-time, higher-res detection) runs tighter
+// than walkthrough to block impostors; both use an ambiguity margin so a
+// face that sits between two students never picks the wrong one.
+const WALKTHROUGH_THRESHOLD = 0.48
+const KIOSK_THRESHOLD = 0.42
+const MATCH_MARGIN = 0.04
 const CONSECUTIVE_FRAMES = 2
-const CHALLENGE_MS = 5000
-const TURN_OFFSET = 0.05
 const SYNC_DEBOUNCE_MS = 15000
 const RECENT_MAX = 24
 
@@ -99,12 +100,10 @@ interface RecentChip {
 }
 
 interface KioskUI {
-  phase: 'idle' | 'challenge' | 'success' | 'info'
-  target?: 'left' | 'right'
+  phase: 'idle' | 'success' | 'info'
   name?: string
   studentId?: string
   message?: string
-  nonce?: number
 }
 
 const nameOf = (r: RosterEntry) => `${r.firstName} ${r.lastName}`.trim()
@@ -123,7 +122,7 @@ export default function ScanView() {
   const [phase, setPhase] = useState<'select' | 'loading' | 'live'>('select')
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [coursesError, setCoursesError] = useState<string | null>(null)
-  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [, setSettings] = useState<AppSettings | null>(null)
   const [mode, setMode] = useState<SessionMode>('WALKTHROUGH')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [faceCount, setFaceCount] = useState<number | null>(null)
@@ -357,7 +356,6 @@ export default function ScanView() {
         roster={live.roster}
         initialChecked={live.checkedEntryIds}
         initialRecent={live.recent}
-        liveness={settings?.liveness ?? true}
         engine={engineRef.current}
       />
     )
@@ -506,7 +504,7 @@ export default function ScanView() {
               <p className="mt-1.5 px-1 text-xs text-muted-foreground">
                 {mode === 'WALKTHROUGH'
                   ? 'Walk around the hall — the app recognises each student automatically.'
-                  : 'Students come to the camera one at a time with a head-turn check.'}
+                  : 'Students come to the camera one at a time — a single glance checks them in.'}
               </p>
             </div>
           </div>
@@ -541,7 +539,6 @@ interface LiveScreenProps {
   roster: RosterEntry[]
   initialChecked: string[]
   initialRecent: RecentChip[]
-  liveness: boolean
   engine: FaceApi | null
 }
 
@@ -550,7 +547,6 @@ function LiveScreen({
   roster,
   initialChecked,
   initialRecent,
-  liveness,
   engine: initialEngine,
 }: LiveScreenProps) {
   const navigate = useAppStore((s) => s.navigate)
@@ -585,7 +581,6 @@ function LiveScreen({
   const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
   const matchersRef = useRef<{ id: string; descriptors: number[][] }[]>([])
   const hitsRef = useRef<Map<string, number>>(new Map())
-  const challengeRef = useRef<{ entryId: string; target: 'left' | 'right'; deadline: number } | null>(null)
   const kioskRef = useRef<KioskUI>(kiosk)
   const mirrorRef = useRef(facing === 'user')
   const busyRef = useRef(false)
@@ -599,7 +594,6 @@ function LiveScreen({
   const dirtyRef = useRef(false)
   const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ---------- static maps ----------
   useEffect(() => {
@@ -777,24 +771,9 @@ function LiveScreen({
     setKiosk(ui)
   }, [])
 
-  const kioskIdle = useCallback(
-    (message?: string) => {
-      challengeRef.current = null
-      setKioskBoth({ phase: 'idle', message })
-      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
-      if (message) {
-        msgTimerRef.current = setTimeout(() => {
-          if (kioskRef.current.phase === 'idle') setKioskBoth({ phase: 'idle' })
-        }, 1800)
-      }
-    },
-    [setKioskBoth]
-  )
-
   const kioskCelebrate = useCallback(
     (entry: RosterEntry, distance?: number) => {
       fnRef.current.checkIn(entry, distance)
-      challengeRef.current = null
       setKioskBoth({
         phase: 'success',
         name: entry.firstName,
@@ -819,10 +798,14 @@ function LiveScreen({
       const video = videoRef.current
       const canvas = canvasRef.current
       if (!video || !canvas) return
-      const faces = await detectAll(engine, video, 256)
+      // low-light lift: detect on an enhanced canvas when the room is dim
+      const { source } = enhanceForDetection(video)
+      const faces = await detectAll(engine, source, 256)
       if (!aliveRef.current) return
       const matches: (FaceMatchInfo | null)[] = faces.map((f) => {
-        const m = bestMatch(f.descriptor, matchersRef.current, WALKTHROUGH_THRESHOLD)
+        const m = bestMatch(f.descriptor, matchersRef.current, WALKTHROUGH_THRESHOLD, {
+          margin: MATCH_MARGIN,
+        })
         if (!m) return null
         const entry = rosterByIdRef.current.get(m.id)
         return entry ? { id: m.id, name: nameOf(entry), distance: m.distance } : null
@@ -851,23 +834,22 @@ function LiveScreen({
       const video = videoRef.current
       const canvas = canvasRef.current
       if (!video || !canvas) return
-      const face = await detectSingle(engine, video, 320)
+      // low-light lift: detect on an enhanced canvas when the room is dim
+      const { source } = enhanceForDetection(video)
+      const face = await detectSingle(engine, source, 320)
       if (!aliveRef.current) return
       const ui = kioskRef.current
 
       if (!face) {
         drawOverlay(canvas, video, [], [], { mirror: mirrorRef.current })
-        if (
-          ui.phase === 'challenge' &&
-          challengeRef.current &&
-          Date.now() > challengeRef.current.deadline
-        ) {
-          kioskIdle("Time's up — look at the camera and try again")
-        }
         return
       }
 
-      const m = bestMatch(face.descriptor, matchersRef.current, KIOSK_THRESHOLD)
+      // Strict matching with ambiguity margin — a face that sits between
+      // two students (or was fraudulently enrolled twice) never passes.
+      const m = bestMatch(face.descriptor, matchersRef.current, KIOSK_THRESHOLD, {
+        margin: MATCH_MARGIN,
+      })
       const matchInfo: FaceMatchInfo | null = m
         ? (() => {
             const entry = rosterByIdRef.current.get(m.id)
@@ -876,6 +858,8 @@ function LiveScreen({
         : null
       drawOverlay(canvas, video, [face], [matchInfo], { mirror: mirrorRef.current })
 
+      // Single-capture verification: the first frontal frame that matches
+      // the roster checks the student in — no head turns, no waiting.
       if (ui.phase === 'idle') {
         if (!matchInfo) return
         const entry = rosterByIdRef.current.get(matchInfo.id)
@@ -891,62 +875,7 @@ function LiveScreen({
           kioskTimerRef.current = setTimeout(() => setKioskBoth({ phase: 'idle' }), 2200)
           return
         }
-        if (liveness) {
-          const target: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right'
-          challengeRef.current = {
-            entryId: entry.id,
-            target,
-            deadline: Date.now() + CHALLENGE_MS,
-          }
-          setKioskBoth({
-            phase: 'challenge',
-            target,
-            name: entry.firstName,
-            nonce: Date.now(),
-          })
-        } else {
-          kioskCelebrate(entry, matchInfo.distance)
-        }
-        return
-      }
-
-      if (ui.phase === 'challenge') {
-        const ch = challengeRef.current
-        if (!ch) {
-          setKioskBoth({ phase: 'idle' })
-          return
-        }
-        if (Date.now() > ch.deadline) {
-          kioskIdle("Time's up — look at the camera and try again")
-          return
-        }
-        if (matchInfo && matchInfo.id !== ch.entryId) {
-          // a different student stepped up — restart the challenge
-          const entry = rosterByIdRef.current.get(matchInfo.id)
-          if (entry) {
-            const target: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right'
-            challengeRef.current = {
-              entryId: entry.id,
-              target,
-              deadline: Date.now() + CHALLENGE_MS,
-            }
-            setKioskBoth({
-              phase: 'challenge',
-              target,
-              name: entry.firstName,
-              nonce: Date.now(),
-            })
-          }
-          return
-        }
-        const off = noseOffset(face)
-        if (
-          (ch.target === 'left' && off > TURN_OFFSET) ||
-          (ch.target === 'right' && off < -TURN_OFFSET)
-        ) {
-          const entry = rosterByIdRef.current.get(ch.entryId)
-          if (entry) kioskCelebrate(entry, matchInfo?.distance)
-        }
+        kioskCelebrate(entry, matchInfo.distance)
       }
       // 'success' | 'info' — just keep boxes drawn
     }
@@ -976,8 +905,6 @@ function LiveScreen({
     cameraState,
     engine,
     session.mode,
-    liveness,
-    kioskIdle,
     setKioskBoth,
     glow,
     kioskCelebrate,
@@ -992,7 +919,6 @@ function LiveScreen({
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
       if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
       if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
-      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
       void flushSyncRef.current()
     }
   }, [])
@@ -1340,34 +1266,6 @@ function KioskOverlay({ ui }: { ui: KioskUI }) {
         <p className="text-3xl font-bold text-amber-400">{ui.name}</p>
         <p className="text-xl font-semibold text-white/85">Already checked in ✓</p>
       </motion.div>
-    )
-  }
-
-  if (ui.phase === 'challenge' && ui.target) {
-    const isLeft = ui.target === 'left'
-    const Arrow = isLeft ? ArrowLeft : ArrowRight
-    return (
-      <div key={`challenge-${ui.nonce ?? ''}`} className="flex flex-col items-center gap-2">
-        <motion.div
-          animate={{ x: isLeft ? [-8, -22, -8] : [8, 22, 8] }}
-          transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }}
-          className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-500 text-amber-950 shadow-xl shadow-amber-500/40"
-        >
-          <Arrow className="h-11 w-11" strokeWidth={3} />
-        </motion.div>
-        <p className="text-5xl font-extrabold tracking-tight">
-          Turn {isLeft ? 'LEFT' : 'RIGHT'}
-        </p>
-        <p className="text-lg font-medium text-white/75">to confirm it&apos;s really you, {ui.name}</p>
-        <div className="mt-1 h-1.5 w-48 overflow-hidden rounded-full bg-white/20">
-          <motion.div
-            className="h-full bg-amber-400"
-            initial={{ width: '100%' }}
-            animate={{ width: '0%' }}
-            transition={{ duration: CHALLENGE_MS / 1000, ease: 'linear' }}
-          />
-        </div>
-      </div>
     )
   }
 
