@@ -1,0 +1,1285 @@
+     1→'use client'
+     2→
+     3→// ============================================================
+     4→// Rollmark — Scan view (the hero screen)
+     5→// select → loading → live. Full-screen, no app shell.
+     6→// Face check-ins — walkthrough or kiosk, single-capture verification.
+     7→// ============================================================
+     8→
+     9→import { useCallback, useEffect, useRef, useState } from 'react'
+    10→import { AnimatePresence, motion } from 'framer-motion'
+    11→import { format } from 'date-fns'
+    12→import { toast } from 'sonner'
+    13→import {
+    14→  CameraOff,
+    15→  Check,
+    16→  LogOut,
+    17→  RefreshCw,
+    18→  ScanFace,
+    19→  Search,
+    20→  SwitchCamera,
+    21→  UserPlus,
+    22→  Users,
+    23→  WifiOff,
+    24→  X,
+    25→} from 'lucide-react'
+    26→
+    27→import { Button } from '@/components/ui/button'
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogContent,
+    31→  AlertDialogDescription,
+    32→  AlertDialogFooter,
+    33→  AlertDialogTitle,
+    34→} from '@/components/ui/alert-dialog'
+    35→import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+    36→import {
+    37→  Sheet,
+    38→  SheetContent,
+    39→  SheetDescription,
+    40→  SheetHeader,
+    41→  SheetTitle,
+    42→} from '@/components/ui/sheet'
+    43→import { Input } from '@/components/ui/input'
+    44→import { IdentityAvatar } from '@/components/app/shared'
+    45→
+    46→import { OfflineError, api, getErrorMessage } from '@/lib/api'
+    47→import { useAppStore } from '@/lib/store'
+    48→import {
+    49→  cacheRoster,
+    50→  getCachedRoster,
+    51→  pendingCount,
+    52→  pendingForSession,
+    53→  queueRecord,
+    54→  removeQueued,
+    55→} from '@/lib/offline'
+    56→import type { PendingRecord } from '@/lib/offline'
+    57→import type {
+    58→  AppSettings,
+    59→  AttendanceRecord,
+    60→  Course,
+    61→  RosterEntry,
+    62→  SessionDetail,
+    63→  SessionMode,
+    64→  SessionSummary,
+    65→} from '@/lib/types'
+    66→import { bestMatch } from '@/lib/face/match'
+    67→import {
+    68→  detectAll,
+    69→  detectSingle,
+    70→  drawOverlay,
+    71→  enhanceForDetection,
+    72→  loadFaceEngine,
+    73→  startCamera,
+    74→  stopCamera,
+    75→  type FaceApi,
+    76→  type FaceMatchInfo,
+    77→} from '@/lib/face/engine'
+    78→
+    79→// ---------- Tunables ----------------------------------------
+    80→
+    81→const DETECT_INTERVAL_MS = 166 // ~6 fps
+    82→// Thresholds: face-api same-person distances sit ~0.30–0.45, different
+    83→// people ~0.52+. Kiosk (one-at-a-time, higher-res detection) runs tighter
+    84→// than walkthrough to block impostors; both use an ambiguity margin so a
+    85→// face that sits between two students never picks the wrong one.
+    86→const WALKTHROUGH_THRESHOLD = 0.48
+    87→const KIOSK_THRESHOLD = 0.42
+    88→const MATCH_MARGIN = 0.04
+    89→const CONSECUTIVE_FRAMES = 2
+    90→const SYNC_DEBOUNCE_MS = 15000
+    91→const RECENT_MAX = 24
+    92→
+    93→// ---------- Local shapes ------------------------------------
+    94→
+    95→interface RecentChip {
+    96→  key: string
+    97→  entryId: string
+    98→  name: string
+    99→  time: string
+   100→}
+   101→
+   102→interface KioskUI {
+   103→  phase: 'idle' | 'success' | 'info'
+   104→  name?: string
+   105→  studentId?: string
+   106→  message?: string
+   107→}
+   108→
+   109→const nameOf = (r: RosterEntry) => `${r.firstName} ${r.lastName}`.trim()
+   110→
+   111→const confidenceOf = (distance: number) =>
+   112→  Math.max(0, Math.min(0.999, 1 - distance))
+   113→
+   114→// ============================================================
+   115→// ScanView
+   116→// ============================================================
+   117→
+   118→export default function ScanView() {
+   119→  const navigate = useAppStore((s) => s.navigate)
+   120→  const online = useAppStore((s) => s.online)
+   121→
+   122→  const [phase, setPhase] = useState<'select' | 'loading' | 'live'>('select')
+   123→  const [courses, setCourses] = useState<Course[] | null>(null)
+   124→  const [coursesError, setCoursesError] = useState<string | null>(null)
+   125→  const [, setSettings] = useState<AppSettings | null>(null)
+   126→  const [mode, setMode] = useState<SessionMode>('WALKTHROUGH')
+   127→  const [selectedId, setSelectedId] = useState<string | null>(null)
+   128→  const [faceCount, setFaceCount] = useState<number | null>(null)
+   129→  const [loadStage, setLoadStage] = useState('Preparing…')
+   130→  const [bootError, setBootError] = useState<{ title: string; message: string } | null>(null)
+   131→  const [live, setLive] = useState<{
+   132→    session: Pick<SessionSummary, 'id' | 'courseId' | 'courseCode'> & { mode: SessionMode }
+   133→    roster: RosterEntry[]
+   134→    checkedEntryIds: string[]
+   135→    recent: RecentChip[]
+   136→  } | null>(null)
+   137→
+   138→  const rosterToken = useRef(0)
+   139→  const bootToken = useRef(0)
+   140→  const engineRef = useRef<FaceApi | null>(null)
+   141→
+   142→  // ---- courses + settings ----
+   143→  useEffect(() => {
+   144→    let alive = true
+   145→    api<{ courses: Course[] }>('/api/courses')
+   146→      .then((d) => {
+   147→        if (alive) setCourses(d.courses)
+   148→      })
+   149→      .catch((e) => {
+   150→        if (alive) setCoursesError(getErrorMessage(e))
+   151→      })
+   152→    api<{ settings: AppSettings }>('/api/settings')
+   153→      .then((d) => {
+   154→        if (alive) {
+   155→          setSettings(d.settings)
+   156→          setMode(d.settings.defaultMode)
+   157→        }
+   158→      })
+   159→      .catch(() => {})
+   160→    return () => {
+   161→      alive = false
+   162→    }
+   163→  }, [])
+   164→
+   165→  // ---- roster count on course select ----
+   166→  const selectCourse = useCallback(
+   167→    async (courseId: string) => {
+   168→      setSelectedId(courseId)
+   169→      setFaceCount(null)
+   170→      const course = courses?.find((c) => c.id === courseId)
+   171→      const token = ++rosterToken.current
+   172→      try {
+   173→        const d = await api<{ roster: RosterEntry[] }>(`/api/courses/${courseId}/roster`)
+   174→        if (rosterToken.current !== token) return
+   175→        setFaceCount(d.roster.filter((r) => r.descriptors.length > 0).length)
+   176→        cacheRoster({
+   177→          savedAt: new Date().toISOString(),
+   178→          course: {
+   179→            id: courseId,
+   180→            code: course?.code ?? '',
+   181→            title: course?.title ?? '',
+   182→          },
+   183→          roster: d.roster,
+   184→        })
+   185→      } catch (e) {
+   186→      if (rosterToken.current !== token) return
+   187→        const cached = getCachedRoster(courseId)
+   188→        if (cached) setFaceCount(cached.roster.filter((r) => r.descriptors.length > 0).length)
+   189→        else if (e instanceof OfflineError) setFaceCount(-1)
+   190→      }
+   191→    },
+   192→    [courses]
+   193→  )
+   194→
+   195→  // ---- session ensure (GET open → POST) ----
+   196→  const ensureSession = useCallback(
+   197→    async (course: Course, sessionMode: SessionMode): Promise<SessionDetail> => {
+   198→      const store = useAppStore.getState()
+   199→      if (!store.online) {
+   200→        const open = store.openSession
+   201→        if (open && open.courseId === course.id) {
+   202→          // resume the open session offline
+   203→          const pending = pendingForSession(open.id)
+   204→          return {
+   205→            id: open.id,
+   206→            courseId: course.id,
+   207→            courseCode: course.code,
+   208→            courseTitle: course.title,
+   209→            mode: open.mode,
+   210→            status: 'OPEN',
+   211→            startedAt: new Date().toISOString(),
+   212→            presentCount: pending.length,
+   213→            rosterSize: course.studentCount,
+   214→            lecturerName: store.user?.name ?? '',
+   215→            records: pending.map<AttendanceRecord>((p) => ({
+   216→              studentId: p.studentId,
+   217→              name: p.name,
+   218→              status: p.status,
+   219→              confidence: p.confidence ?? null,
+   220→              markedAt: p.markedAt,
+   221→            })),
+   222→          }
+   223→        }
+   224→        throw new Error('Starting a new scan needs a connection — reconnect and try again.')
+   225→      }
+   226→
+   227→      const { sessions } = await api<{ sessions: SessionSummary[] }>(
+   228→        `/api/sessions?courseId=${encodeURIComponent(course.id)}&status=OPEN`
+   229→      )
+   230→      let summary = sessions[0] ?? null
+   231→      if (!summary) {
+   232→        const created = await api<{ session: SessionSummary }>('/api/sessions', {
+   233→          method: 'POST',
+   234→          body: { courseId: course.id, mode: sessionMode },
+   235→        })
+   236→        summary = created.session
+   237→      }
+   238→      // Pull detail for seeding existing check-ins (best effort)
+   239→      try {
+   240→        const detail = await api<{ session: SessionDetail }>(`/api/sessions/${summary.id}`)
+   241→        return detail.session
+   242→      } catch {
+   243→        return {
+   244→          ...summary,
+   245→          lecturerName: store.user?.name ?? '',
+   246→          records: [],
+   247→        }
+   248→      }
+   249→    },
+   250→    []
+   251→  )
+   252→
+   253→  // ---- start scanning ----
+   254→  const startScan = useCallback(async () => {
+   255→    const course = courses?.find((c) => c.id === selectedId)
+   256→    if (!course) return
+   257→    const token = ++bootToken.current
+   258→    setPhase('loading')
+   259→    setBootError(null)
+   260→    setLoadStage('Fetching roster…')
+   261→
+   262→    try {
+   263→      // 1. roster
+   264→      let roster: RosterEntry[] | null = null
+   265→      try {
+   266→        const d = await api<{ course: { id: string; code: string; title: string }; roster: RosterEntry[] }>(
+   267→          `/api/courses/${course.id}/roster`
+   268→        )
+   269→        roster = d.roster
+   270→        cacheRoster({
+   271→          savedAt: new Date().toISOString(),
+   272→          course: d.course,
+   273→          roster: d.roster,
+   274→        })
+   275→      } catch (e) {
+   276→        const cached = getCachedRoster(course.id)
+   277→        if (cached) roster = cached.roster
+   278→        else if (!(e instanceof OfflineError)) throw e
+   279→      }
+   280→      if (bootToken.current !== token) return
+   281→      if (!roster) {
+   282→        throw new Error(
+   283→          'You are offline and this course has no cached roster. Reconnect and try again.'
+   284→        )
+   285→      }
+   286→
+   287→      // 2. face engine
+   288→      setLoadStage('Loading face engine…')
+   289→      const faceapi = await loadFaceEngine((s) => {
+   290→        if (bootToken.current === token) setLoadStage(s)
+   291→      })
+   292→      if (bootToken.current !== token) return
+   293→      engineRef.current = faceapi
+   294→
+   295→      // 3. session (create / resume)
+   296→      setLoadStage('Preparing session…')
+   297→      const session = await ensureSession(course, mode)
+   298→      if (bootToken.current !== token) return
+   299→
+   300→      // 4. seed existing check-ins (resume case)
+   301→      const byStudent = new Map(roster.map((r) => [r.studentId, r]))
+   302→      const checkedEntryIds = new Set<string>()
+   303→      const recent: RecentChip[] = []
+   304→      const records = [...session.records].sort(
+   305→        (a, b) => new Date(b.markedAt).getTime() - new Date(a.markedAt).getTime()
+   306→      )
+   307→      for (const rec of records) {
+   308→        if (rec.status === 'ABSENT') continue
+   309→        const entry = byStudent.get(rec.studentId)
+   310→        if (!entry) continue
+   311→        checkedEntryIds.add(entry.id)
+   312→        if (recent.length < 8) {
+   313→          recent.push({
+   314→            key: `${entry.id}-${rec.markedAt}`,
+   315→            entryId: entry.id,
+   316→            name: rec.name ?? nameOf(entry),
+   317→            time: format(new Date(rec.markedAt), 'h:mm a'),
+   318→          })
+   319→        }
+   320→      }
+   321→
+   322→      useAppStore.getState().setOpenSession({
+   323→        id: session.id,
+   324→        courseId: course.id,
+   325→        courseCode: course.code,
+   326→        mode: mode === 'KIOSK' ? 'KIOSK' : 'WALKTHROUGH',
+   327→      })
+   328→
+   329→      setLive({
+   330→        session: {
+   331→          id: session.id,
+   332→          courseId: course.id,
+   333→          courseCode: course.code,
+   334→          mode: mode === 'KIOSK' ? 'KIOSK' : 'WALKTHROUGH',
+   335→        },
+   336→        roster,
+   337→        checkedEntryIds: [...checkedEntryIds],
+   338→        recent,
+   339→      })
+   340→      setLoadStage('Starting camera…')
+   341→      setPhase('live')
+   342→    } catch (e) {
+   343→      if (bootToken.current !== token) return
+   344→      setBootError({
+   345→        title: 'Could not start scanning',
+   346→        message: getErrorMessage(e),
+   347→      })
+   348→    }
+   349→  }, [courses, selectedId, mode, ensureSession])
+   350→
+   351→  // ---- render ----
+   352→  if (phase === 'live' && live) {
+   353→    return (
+   354→      <LiveScreen
+   355→        session={live.session}
+   356→        roster={live.roster}
+   357→        initialChecked={live.checkedEntryIds}
+   358→        initialRecent={live.recent}
+   359→        engine={engineRef.current}
+   360→      />
+   361→    )
+   362→  }
+   363→
+   364→  if (phase === 'loading') {
+   365→    return (
+   366→      <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+   367→        <div className="relative flex h-16 w-16 items-center justify-center">
+   368→          <span className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
+   369→          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+   370→            <ScanFace className="h-7 w-7" />
+   371→          </span>
+   372→        </div>
+   373→        <p className="text-sm font-medium text-muted-foreground" aria-live="polite">
+   374→          {loadStage}
+   375→        </p>
+   376→        {bootError && (
+   377→          <div className="w-full max-w-sm rounded-2xl border bg-card p-4 text-left">
+   378→            <p className="font-semibold">{bootError.title}</p>
+   379→            <p className="mt-1 text-sm text-muted-foreground">{bootError.message}</p>
+   380→            <div className="mt-4 flex gap-2">
+   381→              <Button className="flex-1" onClick={startScan}>
+   382→                <RefreshCw className="h-4 w-4" /> Retry
+   383→              </Button>
+   384→              <Button variant="outline" onClick={() => setPhase('select')}>
+   385→                Back
+   386→              </Button>
+   387→            </div>
+   388→          </div>
+   389→        )}
+   390→      </div>
+   391→    )
+   392→  }
+   393→
+   394→  // ---- select ----
+   395→  const selected = courses?.find((c) => c.id === selectedId) ?? null
+   396→  return (
+   397→    <div className="flex h-dvh flex-col bg-background">
+   398→      <header className="flex items-center gap-3 px-4 pt-safe lg:px-8" style={{ paddingTop: 'max(env(safe-area-inset-top), 14px)', paddingBottom: 12 }}>
+   399→        <Button
+   400→          variant="ghost"
+   401→          size="icon"
+   402→          className="size-9"
+   403→          onClick={() => (useAppStore.getState().openSession ? replaceHomeSafely() : useAppStore.getState().back())}
+   404→          aria-label="Close scanner"
+   405→        >
+   406→          <X className="h-5 w-5" />
+   407→        </Button>
+   408→        <div>
+   409→          <h1 className="text-lg font-bold tracking-tight">Take attendance</h1>
+   410→          <p className="text-xs text-muted-foreground">Choose a course and scan mode</p>
+   411→        </div>
+   412→      </header>
+   413→
+   414→      <main className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-6">
+   415→        {coursesError && (
+   416→          <div className="rounded-2xl border bg-card p-4 text-sm">
+   417→            <p className="font-semibold">Couldn&apos;t load courses</p>
+   418→            <p className="mt-1 text-muted-foreground">{coursesError}</p>
+   419→          </div>
+   420→        )}
+   421→
+   422→        {!courses && !coursesError && (
+   423→          <div className="space-y-2">
+   424→            {[0, 1, 2].map((i) => (
+   425→              <div key={i} className="h-[72px] animate-pulse rounded-2xl bg-muted" />
+   426→            ))}
+   427→          </div>
+   428→        )}
+   429→
+   430→        {courses && courses.length === 0 && (
+   431→          <div className="rounded-2xl border bg-card p-6 text-center text-sm text-muted-foreground">
+   432→            No courses yet — create one from the Home screen first.
+   433→          </div>
+   434→        )}
+   435→
+   436→        {courses && courses.length > 0 && (
+   437→          <div className="space-y-3">
+   438→            <div className="space-y-2" role="radiogroup" aria-label="Course">
+   439→              {courses.map((c) => (
+   440→                <button
+   441→                  key={c.id}
+   442→                  type="button"
+   443→                  role="radio"
+   444→                  aria-checked={selectedId === c.id}
+   445→                  onClick={() => void selectCourse(c.id)}
+   446→                  className={`flex w-full items-center justify-between gap-3 rounded-2xl border bg-card p-4 text-left transition-all min-h-11 ${
+   447→                    selectedId === c.id
+   448→                      ? 'border-primary ring-2 ring-primary/30'
+   449→                      : 'hover:bg-accent/50'
+   450→                  }`}
+   451→                >
+   452→                  <div className="min-w-0">
+   453→                    <p className="font-semibold tracking-tight">{c.code}</p>
+   454→                    <p className="truncate text-sm text-muted-foreground">{c.title}</p>
+   455→                  </div>
+   456→                  <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+   457→                    {c.studentCount} students
+   458→                  </span>
+   459→                </button>
+   460→              ))}
+   461→            </div>
+   462→
+   463→            {selected && faceCount === 0 && (
+   464→              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+   465→                No students in {selected.code} have enrolled their face yet — you can
+   466→                still mark students present manually during review.
+   467→              </div>
+   468→            )}
+   469→            {selected && (faceCount ?? 0) > 0 && (
+   470→              <p className="px-1 text-xs text-muted-foreground">
+   471→                {faceCount} of {selected.studentCount} students face-enrolled · roster cached
+   472→                for offline scanning
+   473→              </p>
+   474→            )}
+   475→            {selected && faceCount === -1 && (
+   476→              <p className="px-1 text-xs text-muted-foreground">
+   477→                Roster unavailable offline — face matching may be limited.
+   478→              </p>
+   479→            )}
+   480→
+   481→            <div>
+   482→              <p className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+   483→                Scan mode
+   484→              </p>
+   485→              <ToggleGroup
+   486→                type="single"
+   487→                value={mode}
+   488→                onValueChange={(v) => v && setMode(v as SessionMode)}
+   489→                className="w-full rounded-xl border bg-card p-1"
+   490→              >
+   491→                <ToggleGroupItem
+   492→                  value="WALKTHROUGH"
+   493→                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+   494→                >
+   495→                  <Users className="h-4 w-4" /> Walkthrough
+   496→                </ToggleGroupItem>
+   497→                <ToggleGroupItem
+   498→                  value="KIOSK"
+   499→                  className="h-10 flex-1 gap-2 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+   500→                >
+   501→                  <ScanFace className="h-4 w-4" /> Kiosk
+   502→                </ToggleGroupItem>
+   503→              </ToggleGroup>
+   504→              <p className="mt-1.5 px-1 text-xs text-muted-foreground">
+   505→                {mode === 'WALKTHROUGH'
+   506→                  ? 'Walk around the hall — the app recognises each student automatically.'
+   507→                  : 'Students come to the camera one at a time — a single glance checks them in.'}
+   508→              </p>
+   509→            </div>
+   510→          </div>
+   511→        )}
+   512→      </main>
+   513→
+   514→      <footer className="border-t bg-card px-4 pb-safe lg:px-8" style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}>
+   515→        <Button
+   516→          className="h-12 w-full text-base font-semibold"
+   517→          disabled={!selectedId}
+   518→          onClick={() => void startScan()}
+   519→        >
+   520→          Start scanning
+   521→        </Button>
+   522→      </footer>
+   523→    </div>
+   524→  )
+   525→}
+   526→
+   527→/** Leaving scan via X while a session is open → go home without ending it. */
+   528→function replaceHomeSafely(): void {
+   529→  // keep the open session in the store so it can be resumed later
+   530→  useAppStore.getState().replace('home')
+   531→}
+   532→
+   533→// ============================================================
+   534→// LiveScreen — camera + detection loop + fallbacks
+   535→// ============================================================
+   536→
+   537→interface LiveScreenProps {
+   538→  session: { id: string; courseId: string; courseCode: string; mode: SessionMode }
+   539→  roster: RosterEntry[]
+   540→  initialChecked: string[]
+   541→  initialRecent: RecentChip[]
+   542→  engine: FaceApi | null
+   543→}
+   544→
+   545→function LiveScreen({
+   546→  session,
+   547→  roster,
+   548→  initialChecked,
+   549→  initialRecent,
+   550→  engine: initialEngine,
+   551→}: LiveScreenProps) {
+   552→  const navigate = useAppStore((s) => s.navigate)
+   553→  const replace = useAppStore((s) => s.replace)
+   554→  const online = useAppStore((s) => s.online)
+   555→
+   556→  const videoRef = useRef<HTMLVideoElement | null>(null)
+   557→  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+   558→
+   559→  const [facing, setFacing] = useState<'user' | 'environment'>(
+   560→    session.mode === 'KIOSK' ? 'user' : 'environment'
+   561→  )
+   562→  const [cameraState, setCameraState] = useState<'starting' | 'ready' | 'error' | 'off'>('starting')
+   563→  const [cameraError, setCameraError] = useState('')
+   564→  const [retryKey, setRetryKey] = useState(0)
+   565→  const [exitOpen, setExitOpen] = useState(false)
+   566→  const [discarding, setDiscarding] = useState(false)
+   567→  const [engine, setEngine] = useState<FaceApi | null>(initialEngine)
+   568→
+   569→  // check-in state
+   570→  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set(initialChecked))
+   571→  const [recent, setRecent] = useState<RecentChip[]>(initialRecent)
+   572→  const [glowId, setGlowId] = useState<string | null>(null)
+   573→  const [kiosk, setKiosk] = useState<KioskUI>({ phase: 'idle' })
+   574→
+   575→  // manual check-in
+   576→  const [manualOpen, setManualOpen] = useState(false)
+   577→  const [manualQuery, setManualQuery] = useState('')
+   578→
+   579→  // ---- refs used inside the detection loop ----
+   580→  const checkedRef = useRef<Set<string>>(new Set(initialChecked))
+   581→  const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
+   582→  const matchersRef = useRef<{ id: string; descriptors: number[][] }[]>([])
+   583→  const hitsRef = useRef<Map<string, number>>(new Map())
+   584→  const kioskRef = useRef<KioskUI>(kiosk)
+   585→  const mirrorRef = useRef(facing === 'user')
+   586→  const busyRef = useRef(false)
+   587→  const aliveRef = useRef(true)
+   588→  const streamRef = useRef<MediaStream | null>(null)
+   589→
+   590→  // sync machinery
+   591→  const bufferRef = useRef<Map<string, AttendanceRecord>>(new Map())
+   592→  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   593→  const syncingRef = useRef(false)
+   594→  const dirtyRef = useRef(false)
+   595→  const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   596→  const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   597→
+   598→  // ---------- static maps ----------
+   599→  useEffect(() => {
+   600→    rosterByIdRef.current = new Map(roster.map((r) => [r.id, r]))
+   601→    matchersRef.current = roster
+   602→      .filter((r) => r.descriptors.length > 0)
+   603→      .map((r) => ({ id: r.id, descriptors: r.descriptors }))
+   604→  }, [roster])
+   605→
+   606→  useEffect(() => {
+   607→    mirrorRef.current = facing === 'user'
+   608→  }, [facing])
+   609→
+   610→  // engine (singleton — resolves instantly if already loaded)
+   611→  useEffect(() => {
+   612→    let alive = true
+   613→    loadFaceEngine()
+   614→      .then((f) => {
+   615→        if (alive) setEngine(f)
+   616→      })
+   617→      .catch(() => {})
+   618→    return () => {
+   619→      alive = false
+   620→    }
+   621→  }, [])
+   622→
+   623→  // ---------- camera ----------
+   624→  useEffect(() => {
+   625→    let cancelled = false
+   626→    let localStream: MediaStream | null = null
+   627→    const video = videoRef.current
+   628→    if (!video) return
+   629→
+   630→    setCameraState('starting')
+   631→    startCamera(video, facing)
+   632→      .then((s) => {
+   633→        if (cancelled) {
+   634→          stopCamera(s)
+   635→          return
+   636→        }
+   637→        localStream = s
+   638→        streamRef.current = s
+   639→        setCameraState('ready')
+   640→      })
+   641→      .catch((e) => {
+   642→        if (cancelled) return
+   643→        setCameraError(getErrorMessage(e))
+   644→        setCameraState('error')
+   645→      })
+   646→
+   647→    return () => {
+   648→      cancelled = true
+   649→      if (localStream) {
+   650→        stopCamera(localStream, videoRef.current)
+   651→        if (streamRef.current === localStream) streamRef.current = null
+   652→      }
+   653→    }
+   654→  }, [facing, retryKey])
+   655→
+   656→  // ---------- check-in + sync ----------
+   657→  const flushSync = useCallback(async () => {
+   658→    if (syncingRef.current) {
+   659→      dirtyRef.current = true
+   660→      return
+   661→    }
+   662→    const records = [...bufferRef.current.values()]
+   663→    if (records.length === 0) return
+   664→    syncingRef.current = true
+   665→    try {
+   666→      await api<{ saved: number }>(`/api/sessions/${session.id}/sync`, {
+   667→        method: 'POST',
+   668→        body: {
+   669→          records: records.map<AttendanceRecord>((r) => ({
+   670→            studentId: r.studentId,
+   671→            name: r.name,
+   672→            status: r.status,
+   673→            confidence: r.confidence ?? null,
+   674→            markedAt: r.markedAt,
+   675→          })),
+   676→        },
+   677→      })
+   678→      for (const r of records) {
+   679→        bufferRef.current.delete(r.studentId)
+   680→        removeQueued(session.id, r.studentId)
+   681→      }
+   682→      useAppStore.getState().setPendingSync(pendingCount())
+   683→    } catch {
+   684→      // stay queued — global flushQueue retries on reconnect
+   685→    } finally {
+   686→      syncingRef.current = false
+   687→      if (dirtyRef.current) {
+   688→        dirtyRef.current = false
+   689→        setTimeout(() => void flushSyncRef.current(), 1000)
+   690→      }
+   691→    }
+   692→  }, [session.id])
+   693→
+   694→  const flushSyncRef = useRef(flushSync)
+   695→  flushSyncRef.current = flushSync
+   696→
+   697→  const scheduleSync = useCallback((rec: PendingRecord) => {
+   698→    bufferRef.current.set(rec.studentId, {
+   699→      studentId: rec.studentId,
+   700→      name: rec.name,
+   701→      status: rec.status,
+   702→      confidence: rec.confidence ?? null,
+   703→      markedAt: rec.markedAt,
+   704→    })
+   705→    if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
+   706→    syncTimerRef.current = setTimeout(() => void flushSyncRef.current(), SYNC_DEBOUNCE_MS)
+   707→  }, [])
+   708→
+   709→  const glow = useCallback((entryId: string) => {
+   710→    setGlowId(entryId)
+   711→    if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
+   712→    glowTimerRef.current = setTimeout(() => setGlowId(null), 1600)
+   713→  }, [])
+   714→
+   715→  const checkIn = useCallback(
+   716→    (entry: RosterEntry, distance?: number): boolean => {
+   717→      if (checkedRef.current.has(entry.id)) {
+   718→        glow(entry.id)
+   719→        return false
+   720→      }
+   721→      checkedRef.current.add(entry.id)
+   722→      const rec: PendingRecord = {
+   723→        sessionId: session.id,
+   724→        studentId: entry.id, // DB id — matches sync API + review merge
+   725→        name: nameOf(entry),
+   726→        status: 'PRESENT',
+   727→        confidence: distance != null ? confidenceOf(distance) : null,
+   728→        markedAt: new Date().toISOString(),
+   729→      }
+   730→      queueRecord(rec)
+   731→      scheduleSync(rec)
+   732→      setCheckedIds((prev) => {
+   733→        const next = new Set(prev)
+   734→        next.add(entry.id)
+   735→        return next
+   736→      })
+   737→      setRecent((prev) =>
+   738→        [
+   739→          {
+   740→            key: `${entry.id}-${rec.markedAt}`,
+   741→            entryId: entry.id,
+   742→            name: rec.name ?? '',
+   743→            time: format(new Date(rec.markedAt), 'h:mm a'),
+   744→          },
+   745→          ...prev,
+   746→        ].slice(0, RECENT_MAX)
+   747→      )
+   748→      navigator.vibrate?.(60)
+   749→      return true
+   750→    },
+   751→    [session.id, scheduleSync, glow]
+   752→  )
+   753→
+   754→  const manualCheckIn = useCallback(
+   755→    (entry: RosterEntry) => {
+   756→      if (checkIn(entry)) {
+   757→        toast.success(`${nameOf(entry)} marked present`)
+   758→      } else {
+   759→        toast.info(`${nameOf(entry)} was already checked in`)
+   760→      }
+   761→    },
+   762→    [checkIn]
+   763→  )
+   764→
+   765→  const fnRef = useRef({ checkIn, flushSync })
+   766→  fnRef.current = { checkIn, flushSync }
+   767→
+   768→  // ---------- kiosk UI helpers ----------
+   769→  const setKioskBoth = useCallback((ui: KioskUI) => {
+   770→    kioskRef.current = ui
+   771→    setKiosk(ui)
+   772→  }, [])
+   773→
+   774→  const kioskCelebrate = useCallback(
+   775→    (entry: RosterEntry, distance?: number) => {
+   776→      fnRef.current.checkIn(entry, distance)
+   777→      setKioskBoth({
+   778→        phase: 'success',
+   779→        name: entry.firstName,
+   780→        studentId: entry.studentId,
+   781→      })
+   782→      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   783→      kioskTimerRef.current = setTimeout(() => {
+   784→        setKioskBoth({ phase: 'idle' })
+   785→      }, 2200)
+   786→    },
+   787→    [setKioskBoth]
+   788→  )
+   789→
+   790→  // ---------- detection loop ----------
+   791→  useEffect(() => {
+   792→    aliveRef.current = true
+   793→    if (cameraState !== 'ready' || !engine) return
+   794→    let raf = 0
+   795→    let last = 0
+   796→
+   797→    const walkthroughStep = async () => {
+   798→      const video = videoRef.current
+   799→      const canvas = canvasRef.current
+   800→      if (!video || !canvas) return
+   801→      // low-light lift: detect on an enhanced canvas when the room is dim
+   802→      const { source } = enhanceForDetection(video)
+   803→      const faces = await detectAll(engine, source, 256)
+   804→      if (!aliveRef.current) return
+   805→      const matches: (FaceMatchInfo | null)[] = faces.map((f) => {
+   806→        const m = bestMatch(f.descriptor, matchersRef.current, WALKTHROUGH_THRESHOLD, {
+   807→          margin: MATCH_MARGIN,
+   808→        })
+   809→        if (!m) return null
+   810→        const entry = rosterByIdRef.current.get(m.id)
+   811→        return entry ? { id: m.id, name: nameOf(entry), distance: m.distance } : null
+   812→      })
+   813→      drawOverlay(canvas, video, faces, matches, { mirror: mirrorRef.current })
+   814→
+   815→      const seen = new Set<string>()
+   816→      faces.forEach((_, i) => {
+   817→        const m = matches[i]
+   818→        if (!m) return
+   819→        seen.add(m.id)
+   820→        const hits = (hitsRef.current.get(m.id) ?? 0) + 1
+   821→        hitsRef.current.set(m.id, hits)
+   822→        if (hits >= CONSECUTIVE_FRAMES) {
+   823→          hitsRef.current.delete(m.id)
+   824→          const entry = rosterByIdRef.current.get(m.id)
+   825→          if (entry) fnRef.current.checkIn(entry, m.distance)
+   826→        }
+   827→      })
+   828→      for (const key of [...hitsRef.current.keys()]) {
+   829→        if (!seen.has(key)) hitsRef.current.delete(key)
+   830→      }
+   831→    }
+   832→
+   833→    const kioskStep = async () => {
+   834→      const video = videoRef.current
+   835→      const canvas = canvasRef.current
+   836→      if (!video || !canvas) return
+   837→      // low-light lift: detect on an enhanced canvas when the room is dim
+   838→      const { source } = enhanceForDetection(video)
+   839→      const face = await detectSingle(engine, source, 320)
+   840→      if (!aliveRef.current) return
+   841→      const ui = kioskRef.current
+   842→
+   843→      if (!face) {
+   844→        drawOverlay(canvas, video, [], [], { mirror: mirrorRef.current })
+   845→        return
+   846→      }
+   847→
+   848→      // Strict matching with ambiguity margin — a face that sits between
+   849→      // two students (or was fraudulently enrolled twice) never passes.
+   850→      const m = bestMatch(face.descriptor, matchersRef.current, KIOSK_THRESHOLD, {
+   851→        margin: MATCH_MARGIN,
+   852→      })
+   853→      const matchInfo: FaceMatchInfo | null = m
+   854→        ? (() => {
+   855→            const entry = rosterByIdRef.current.get(m.id)
+   856→            return entry ? { id: m.id, name: nameOf(entry), distance: m.distance } : null
+   857→          })()
+   858→        : null
+   859→      drawOverlay(canvas, video, [face], [matchInfo], { mirror: mirrorRef.current })
+   860→
+   861→      // Single-capture verification: the first frontal frame that matches
+   862→      // the roster checks the student in — no head turns, no waiting.
+   863→      if (ui.phase === 'idle') {
+   864→        if (!matchInfo) return
+   865→        const entry = rosterByIdRef.current.get(matchInfo.id)
+   866→        if (!entry) return
+   867→        if (checkedRef.current.has(entry.id)) {
+   868→          glow(entry.id)
+   869→          setKioskBoth({
+   870→            phase: 'info',
+   871→            name: nameOf(entry),
+   872→            studentId: entry.studentId,
+   873→          })
+   874→          if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   875→          kioskTimerRef.current = setTimeout(() => setKioskBoth({ phase: 'idle' }), 2200)
+   876→          return
+   877→        }
+   878→        kioskCelebrate(entry, matchInfo.distance)
+   879→      }
+   880→      // 'success' | 'info' — just keep boxes drawn
+   881→    }
+   882→
+   883→    const tick = (t: number) => {
+   884→      raf = requestAnimationFrame(tick)
+   885→      if (t - last < DETECT_INTERVAL_MS) return
+   886→      last = t
+   887→      if (busyRef.current) return
+   888→      const video = videoRef.current
+   889→      if (!video || video.readyState < 2) return
+   890→      busyRef.current = true
+   891→      const step = session.mode === 'KIOSK' ? kioskStep() : walkthroughStep()
+   892→      void step
+   893→        .catch(() => {})
+   894→        .finally(() => {
+   895→          busyRef.current = false
+   896→        })
+   897→    }
+   898→    raf = requestAnimationFrame(tick)
+   899→
+   900→    return () => {
+   901→      aliveRef.current = false
+   902→      cancelAnimationFrame(raf)
+   903→    }
+   904→  }, [
+   905→    cameraState,
+   906→    engine,
+   907→    session.mode,
+   908→    setKioskBoth,
+   909→    glow,
+   910→    kioskCelebrate,
+   911→  ])
+   912→
+   913→  // ---------- lifecycle cleanup ----------
+   914→  useEffect(() => {
+   915→    return () => {
+   916→      aliveRef.current = false
+   917→      stopCamera(streamRef.current, videoRef.current)
+   918→      streamRef.current = null
+   919→      if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
+   920→      if (glowTimerRef.current) clearTimeout(glowTimerRef.current)
+   921→      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current)
+   922→      void flushSyncRef.current()
+   923→    }
+   924→  }, [])
+   925→
+   926→  // ---------- end / discard ----------
+   927→  const endAndReview = useCallback(() => {
+   928→    setExitOpen(false)
+   929→    void flushSyncRef.current()
+   930→    navigate('review', { sessionId: session.id })
+   931→  }, [navigate, session.id])
+   932→
+   933→  const discardSession = useCallback(async () => {
+   934→    setExitOpen(false)
+   935→    setDiscarding(true)
+   936→    try {
+   937→      await api<{ ok: boolean }>(`/api/sessions/${session.id}`, { method: 'DELETE' })
+   938→      for (const rec of pendingForSession(session.id)) {
+   939→        removeQueued(session.id, rec.studentId)
+   940→      }
+   941→      useAppStore.getState().setPendingSync(pendingCount())
+   942→      useAppStore.getState().setOpenSession(null)
+   943→      replace('home')
+   944→    } catch (e) {
+   945→      toast.error(getErrorMessage(e))
+   946→    } finally {
+   947→      setDiscarding(false)
+   948→    }
+   949→  }, [replace, session.id])
+   950→
+   951→  const cameraUnavailable = cameraState === 'error' || cameraState === 'off'
+   952→
+   953→  // ---------- manual add list ----------
+   954→  const mq = manualQuery.trim().toLowerCase()
+   955→  const manualCandidates = roster.filter(
+   956→    (r) =>
+   957→      !checkedIds.has(r.id) &&
+   958→      (mq === '' ||
+   959→        nameOf(r).toLowerCase().includes(mq) ||
+   960→        r.studentId.toLowerCase().includes(mq))
+   961→  )
+   962→
+   963→  // ---------- render ----------
+   964→  return (
+   965→    <div className="fixed inset-0 flex h-dvh flex-col bg-black text-white">
+   966→      {/* top bar */}
+   967→      <header className="flex items-center gap-2 bg-black/80 px-3 pt-safe" style={{ paddingTop: 'max(env(safe-area-inset-top), 10px)', paddingBottom: 10 }}>
+   968→        <Button
+   969→          variant="ghost"
+   970→          size="icon"
+   971→          className="size-10 shrink-0 text-white hover:bg-white/15"
+   972→          onClick={() => setExitOpen(true)}
+   973→          aria-label="End scanning"
+   974→        >
+   975→          <X className="h-5 w-5" />
+   976→        </Button>
+   977→        <div className="flex min-w-0 flex-1 items-center gap-2">
+   978→          <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold tracking-wide">
+   979→            {session.courseCode}
+   980→          </span>
+   981→          <span
+   982→            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${
+   983→              checkedIds.size > 0 ? 'bg-emerald-500 text-emerald-950' : 'bg-white/10 text-white/80'
+   984→            }`}
+   985→            aria-label={`${checkedIds.size} of ${roster.length} checked in`}
+   986→          >
+   987→            <Check className="h-3.5 w-3.5" strokeWidth={3} />
+   988→            {checkedIds.size} / {roster.length}
+   989→          </span>
+   990→          {!online && (
+   991→            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-semibold text-amber-300">
+   992→              <WifiOff className="h-3 w-3" /> Offline — saving on device
+   993→            </span>
+   994→          )}
+   995→        </div>
+   996→        <Button
+   997→          variant="ghost"
+   998→          size="icon"
+   999→          className="size-10 shrink-0 text-white hover:bg-white/15"
+  1000→          onClick={() => setFacing((f) => (f === 'user' ? 'environment' : 'user'))}
+  1001→          aria-label="Flip camera"
+  1002→          disabled={cameraState === 'off'}
+  1003→        >
+  1004→          <SwitchCamera className="h-5 w-5" />
+  1005→        </Button>
+  1006→      </header>
+  1007→
+  1008→      {/* video area */}
+  1009→      <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
+  1010→        <video
+  1011→          ref={videoRef}
+  1012→          className="absolute inset-0 h-full w-full object-cover"
+  1013→          style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
+  1014→          playsInline
+  1015→          muted
+  1016→          autoPlay
+  1017→        />
+  1018→        <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+  1019→
+  1020→        {cameraState === 'starting' && (
+  1021→          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+  1022→            <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+  1023→            <p className="text-sm text-white/80">Starting camera…</p>
+  1024→          </div>
+  1025→        )}
+  1026→
+  1027→        {cameraUnavailable && (
+  1028→          <div className="absolute inset-0 flex items-center justify-center bg-neutral-950 p-6">
+  1029→            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
+  1030→              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+  1031→                <CameraOff className="h-6 w-6" />
+  1032→              </div>
+  1033→              <p className="mt-3 font-semibold">Camera unavailable</p>
+  1034→              <p className="mt-1 text-sm text-white/70">
+  1035→                {cameraError || 'Check the browser permission and try again.'}
+  1036→              </p>
+  1037→              <div className="mt-4 flex flex-col gap-2">
+  1038→                <Button
+  1039→                  className="h-11"
+  1040→                  onClick={() => {
+  1041→                    setCameraError('')
+  1042→                    setCameraState('starting')
+  1043→                    setRetryKey((k) => k + 1)
+  1044→                  }}
+  1045→                >
+  1046→                  <RefreshCw className="h-4 w-4" /> Retry camera
+  1047→                </Button>
+  1048→              </div>
+  1049→            </div>
+  1050→          </div>
+  1051→        )}
+  1052→
+  1053→        {/* kiosk giant state machine */}
+  1054→        {session.mode === 'KIOSK' && cameraState === 'ready' && (
+  1055→          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pb-8 pt-16 text-center">
+  1056→            <KioskOverlay ui={kiosk} />
+  1057→          </div>
+  1058→        )}
+  1059→      </div>
+  1060→
+  1061→      {/* bottom panel */}
+  1062→      {session.mode === 'KIOSK' ? (
+  1063→        <footer className="bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
+  1064→          <div className="flex gap-2 px-4">
+  1065→            <Button
+  1066→              variant="outline"
+  1067→              className="h-12 shrink-0 gap-2"
+  1068→              onClick={() => setManualOpen(true)}
+  1069→            >
+  1070→              <UserPlus className="h-4 w-4" /> Add manually
+  1071→            </Button>
+  1072→            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
+  1073→              End &amp; review
+  1074→            </Button>
+  1075→          </div>
+  1076→        </footer>
+  1077→      ) : (
+  1078→        <footer className="border-t bg-background pb-safe text-foreground" style={{ paddingTop: 10, paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}>
+  1079→          <div className="no-scrollbar mb-2.5 flex gap-2 overflow-x-auto px-4" aria-live="polite">
+  1080→            <AnimatePresence initial={false} mode="popLayout">
+  1081→              {recent.length === 0 && (
+  1082→                <motion.span
+  1083→                  key="empty"
+  1084→                  initial={{ opacity: 0 }}
+  1085→                  animate={{ opacity: 1 }}
+  1086→                  exit={{ opacity: 0 }}
+  1087→                  className="py-1 text-xs text-muted-foreground"
+  1088→                >
+  1089→                  Check-ins will appear here…
+  1090→                </motion.span>
+  1091→              )}
+  1092→              {recent.map((chip) => (
+  1093→                <motion.span
+  1094→                  key={chip.key}
+  1095→                  layout
+  1096→                  initial={{ opacity: 0, scale: 0.7, y: 10 }}
+  1097→                  animate={{ opacity: 1, scale: 1, y: 0 }}
+  1098→                  exit={{ opacity: 0, scale: 0.7 }}
+  1099→                  transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+  1100→                  className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
+  1101→                    glowId === chip.entryId
+  1102→                      ? 'border-emerald-400 ring-2 ring-emerald-400/60'
+  1103→                      : 'border-border'
+  1104→                  }`}
+  1105→                >
+  1106→                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600/15 text-emerald-700 dark:text-emerald-400">
+  1107→                    <Check className="h-3 w-3" strokeWidth={3} />
+  1108→                  </span>
+  1109→                  <span className="max-w-36 truncate font-semibold">{chip.name}</span>
+  1110→                  <span className="tabular-nums text-muted-foreground">{chip.time}</span>
+  1111→                </motion.span>
+  1112→              ))}
+  1113→            </AnimatePresence>
+  1114→          </div>
+  1115→          <div className="flex gap-2 px-4">
+  1116→            <Button
+  1117→              variant="outline"
+  1118→              className="h-12 shrink-0 gap-2"
+  1119→              onClick={() => setManualOpen(true)}
+  1120→            >
+  1121→              <UserPlus className="h-4 w-4" /> Add manually
+  1122→            </Button>
+  1123→            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
+  1124→              End &amp; review
+  1125→            </Button>
+  1126→          </div>
+  1127→        </footer>
+  1128→      )}
+  1129→
+  1130→      {/* exit dialog */}
+  1131→      <AlertDialog open={exitOpen} onOpenChange={setExitOpen}>
+  1132→        <AlertDialogContent className="max-w-sm rounded-2xl">
+  1133→          <AlertDialogTitle>End scanning?</AlertDialogTitle>
+  1134→          <AlertDialogDescription>
+  1135→            {checkedIds.size > 0
+  1136→              ? `${checkedIds.size} of ${roster.length} students checked in this session.`
+  1137→              : 'No one has checked in yet.'}
+  1138→          </AlertDialogDescription>
+  1139→          <AlertDialogFooter className="flex-col gap-2">
+  1140→            <Button className="h-11 w-full" onClick={endAndReview} disabled={discarding}>
+  1141→              End &amp; review
+  1142→            </Button>
+  1143→            <Button
+  1144→              variant="outline"
+  1145→              className="h-11 w-full"
+  1146→              onClick={() => setExitOpen(false)}
+  1147→              disabled={discarding}
+  1148→            >
+  1149→              Keep scanning
+  1150→            </Button>
+  1151→            <Button
+  1152→              variant="ghost"
+  1153→              className="h-11 w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+  1154→              onClick={() => void discardSession()}
+  1155→              disabled={discarding}
+  1156→            >
+  1157→              <LogOut className="h-4 w-4" /> Discard session
+  1158→            </Button>
+  1159→          </AlertDialogFooter>
+  1160→        </AlertDialogContent>
+  1161→      </AlertDialog>
+  1162→
+  1163→      {/* manual check-in sheet */}
+  1164→      <Sheet open={manualOpen} onOpenChange={setManualOpen}>
+  1165→        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 rounded-t-3xl p-0">
+  1166→          <SheetHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
+  1167→            <SheetTitle>Add student manually</SheetTitle>
+  1168→            <SheetDescription>
+  1169→              For students who opted out of face scans or whose face didn&apos;t match.
+  1170→            </SheetDescription>
+  1171→          </SheetHeader>
+  1172→          <div className="shrink-0 px-4 pt-3">
+  1173→            <div className="relative">
+  1174→              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+  1175→              <Input
+  1176→                value={manualQuery}
+  1177→                onChange={(e) => setManualQuery(e.target.value)}
+  1178→                placeholder="Search name or student ID…"
+  1179→                className="h-11 rounded-xl bg-card pl-9"
+  1180→                inputMode="search"
+  1181→              />
+  1182→            </div>
+  1183→            <p className="mt-2 px-1 text-[11px] text-muted-foreground" aria-live="polite">
+  1184→              {roster.length - checkedIds.size} of {roster.length} still to check in · tap a name
+  1185→              to mark present
+  1186→            </p>
+  1187→          </div>
+  1188→          <div className="mt-2 min-h-0 flex-1 overflow-y-auto scrollbar-thin px-4 pb-2">
+  1189→            {manualCandidates.length === 0 ? (
+  1190→              <div className="py-10 text-center text-sm text-muted-foreground">
+  1191→                {checkedIds.size === roster.length
+  1192→                  ? 'Everyone is checked in.'
+  1193→                  : `No students match “${manualQuery}”.`}
+  1194→              </div>
+  1195→            ) : (
+  1196→              <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+  1197→                {manualCandidates.map((r) => (
+  1198→                  <button
+  1199→                    key={r.id}
+  1200→                    type="button"
+  1201→                    onClick={() => manualCheckIn(r)}
+  1202→                    className="flex min-h-11 w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/60 active:bg-accent"
+  1203→                  >
+  1204→                    <IdentityAvatar name={nameOf(r)} className="h-9 w-9" />
+  1205→                    <span className="min-w-0 flex-1 leading-tight">
+  1206→                      <span className="block truncate text-sm font-medium">{nameOf(r)}</span>
+  1207→                      <span className="block font-mono text-[11px] text-muted-foreground">
+  1208→                        {r.studentId}
+  1209→                      </span>
+  1210→                    </span>
+  1211→                    <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
+  1212→                  </button>
+  1213→                ))}
+  1214→              </div>
+  1215→            )}
+  1216→          </div>
+  1217→          <div
+  1218→            className="shrink-0 border-t bg-background px-4"
+  1219→            style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
+  1220→          >
+  1221→            <Button variant="outline" className="h-11 w-full" onClick={() => setManualOpen(false)}>
+  1222→              Done
+  1223→            </Button>
+  1224→          </div>
+  1225→        </SheetContent>
+  1226→      </Sheet>
+  1227→
+  1228→    </div>
+  1229→  )
+  1230→}
+  1231→
+  1232→// ---------- Kiosk overlay ----------
+  1233→
+  1234→function KioskOverlay({ ui }: { ui: KioskUI }) {
+  1235→  if (ui.phase === 'success') {
+  1236→    return (
+  1237→      <motion.div
+  1238→        key="success"
+  1239→        initial={{ opacity: 0, scale: 0.7 }}
+  1240→        animate={{ opacity: 1, scale: 1 }}
+  1241→        transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+  1242→        className="flex flex-col items-center gap-3"
+  1243→      >
+  1244→        <motion.div
+  1245→          initial={{ scale: 0, rotate: -30 }}
+  1246→          animate={{ scale: 1, rotate: 0 }}
+  1247→          transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
+  1248→          className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 shadow-xl shadow-emerald-500/40"
+  1249→        >
+  1250→          <Check className="h-14 w-14 text-emerald-950" strokeWidth={3.5} />
+  1251→        </motion.div>
+  1252→        <p className="text-4xl font-extrabold tracking-tight">Welcome, {ui.name}</p>
+  1253→        <p className="text-xl font-semibold tabular-nums text-white/80">{ui.studentId}</p>
+  1254→      </motion.div>
+  1255→    )
+  1256→  }
+  1257→
+  1258→  if (ui.phase === 'info') {
+  1259→    return (
+  1260→      <motion.div
+  1261→        key="info"
+  1262→        initial={{ opacity: 0, y: 14 }}
+  1263→        animate={{ opacity: 1, y: 0 }}
+  1264→        className="flex flex-col items-center gap-2"
+  1265→      >
+  1266→        <p className="text-3xl font-bold text-amber-400">{ui.name}</p>
+  1267→        <p className="text-xl font-semibold text-white/85">Already checked in ✓</p>
+  1268→      </motion.div>
+  1269→    )
+  1270→  }
+  1271→
+  1272→  return (
+  1273→    <div key="idle" className="flex flex-col items-center gap-1.5">
+  1274→      <p className="text-3xl font-bold tracking-tight sm:text-4xl">
+  1275→        {ui.message ?? 'Look at the camera'}
+  1276→      </p>
+  1277→      {!ui.message && (
+  1278→        <p className="text-base text-white/70">
+  1279→          Stand about an arm&apos;s length away — you&apos;ll be checked in automatically
+  1280→        </p>
+  1281→      )}
+  1282→    </div>
+  1283→  )
+  1284→}
+  1285→
