@@ -273,3 +273,25 @@ Work Log:
 
 Stage Summary:
 - Brand glyph is once again the Face ID scan mark the user liked — now alive: its eyes blink every ~4.2s on the sign-in/sign-up page, sidebar, mobile top bar, onboarding and boot screen. Army green palette and the Rollmark name from Task 18 are unchanged; icons/favicons now match the new glyph.
+
+---
+Task ID: 20
+Agent: Z.ai Code (main)
+Task: Answer blink duration question; restore Level/Semester ("trimester") visibility when creating a course after onboarding; add Level 600 to all level selects.
+
+Work Log:
+- Confirmed blink timing from globals.css: `rm-eye-blink 4.2s ease-in-out infinite`; blink motion spans 88%→94.5% of cycle ≈ 0.27s close+reopen, eyes open the remaining ~3.93s. Answered user.
+- Diagnosed "trimester options missing": only course-creation UI is onboarding wizard step 3; "New course" quick action reopens the wizard at Step 0 (Your details) for onboarded lecturers, so Level/Semester never appeared without clicking through profile + department steps again.
+- Fix in src/components/app/views/onboarding.tsx:
+  - `step` initial state = `user?.onboarded ? 2 : 0` → onboarded lecturers land directly on "Your courses".
+  - `addOpen` initial = `Boolean(user?.onboarded)` → Add-course form (with Level + Semester) is already expanded.
+  - Header subtitle for onboarded users → "Add a course or edit your profile".
+- Added Level 600 to `LEVELS` in onboarding.tsx (course form), students.tsx (add student), student.tsx (edit student). API zod schemas already allowed 100–900, no backend change needed.
+- E2E (agent-browser): first-time onboarding still starts at Step 0 (regression OK); completed admin onboarding with PAHM dept; Level dropdown shows 100–600; Semester shows 1/2; added TST 601 L600 S2; after Finish, "New course" from Home jumped straight to "Your courses" with form open; screenshot captured.
+- Cleanup: deleted TST 601; reset admin to original state (onboarded=false, departmentId=null, name "Department Admin", title null). Lecturer account abubakarim78@gmail.com, PAHM department and SPS 201 course untouched.
+- Lint clean; dev.log shows only 200s.
+
+Stage Summary:
+- Blink: 4.2s loop, ~0.27s blink motion (natural human blink range).
+- "New course" now opens directly on the courses step with Level (100–600) + Semester visible — no more re-walking the wizard.
+- Level 600 available in course creation, add-student, and edit-student forms.

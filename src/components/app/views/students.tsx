@@ -55,7 +55,7 @@ import {
 import { EmptyState, IdentityAvatar, PageHeader } from '@/components/app/shared'
 import { cn } from '@/lib/utils'
 
-const LEVELS = [100, 200, 300, 400, 500] as const
+const LEVELS = [100, 200, 300, 400, 500, 600] as const
 
 export default function StudentsView() {
   const navigate = useAppStore((s) => s.navigate)

@@ -60,7 +60,7 @@ import {
 } from '@/components/app/shared'
 import { cn } from '@/lib/utils'
 
-const LEVELS = [100, 200, 300, 400, 500] as const
+const LEVELS = [100, 200, 300, 400, 500, 600] as const
 
 export default function StudentView() {
   const studentIdParam = useAppStore((s) => s.params.studentId)
