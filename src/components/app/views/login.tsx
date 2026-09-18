@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, ApiError, getErrorMessage, setAuthToken } from '@/lib/api'
+import { api, ApiError, OfflineError, getErrorMessage, setAuthToken } from '@/lib/api'
+import { writeCachedUser } from '@/lib/session-cache'
 import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
@@ -24,6 +25,19 @@ export default function LoginView() {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [offline, setOffline] = useState(false)
+
+  // Reflect connectivity so users understand why sign-in can fail.
+  useEffect(() => {
+    const sync = () => setOffline(!navigator.onLine)
+    sync()
+    window.addEventListener('online', sync)
+    window.addEventListener('offline', sync)
+    return () => {
+      window.removeEventListener('online', sync)
+      window.removeEventListener('offline', sync)
+    }
+  }, [])
 
   const switchMode = (next: Mode) => {
     setMode(next)
@@ -33,6 +47,8 @@ export default function LoginView() {
   const finish = (data: LoginResponse) => {
     // Store the bearer token — cookies can be blocked in embedded contexts.
     if (data.token) setAuthToken(data.token)
+    // Remember the profile so an offline PWA launch can restore the session.
+    writeCachedUser(data.user)
     setUser(data.user)
     replace(data.user.onboarded ? 'home' : 'onboarding')
   }
@@ -75,7 +91,11 @@ export default function LoginView() {
         finish(data)
       }
     } catch (err) {
-      if (err instanceof ApiError && (err.status === 401 || err.status === 409)) {
+      if (err instanceof OfflineError) {
+        setFormError(
+          'You are offline — signing in needs an internet connection. If you have signed in on this device before, just reopen the app and your saved session will work offline.'
+        )
+      } else if (err instanceof ApiError && (err.status === 401 || err.status === 409)) {
         setFormError(err.message)
       } else if (err instanceof ApiError && err.status === 400) {
         setFormError(err.message)
@@ -124,6 +144,19 @@ export default function LoginView() {
               exit={{ opacity: 0, x: isSignup ? -16 : 16 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
             >
+              {offline && (
+                <div
+                  className="mb-4 flex items-start gap-2 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-2.5 text-sm"
+                  role="status"
+                >
+                  <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <p className="text-amber-700 dark:text-amber-400">
+                    You are offline. If you have signed in on this device before,
+                    reopen the app — your saved session works without internet.
+                  </p>
+                </div>
+              )}
+
               <h2 className="text-lg font-semibold tracking-tight">
                 {isSignup ? 'Create your account' : 'Welcome back'}
               </h2>

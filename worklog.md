@@ -430,3 +430,35 @@ Stage Summary:
 - Deploys are self-notifying: Docker build stamps a unique SW version per publish; sw.js is always revalidated.
 - One-time bootstrap note for the user: devices still running a pre-toast bundle need one manual restart (close + reopen PWA) to load this code; every publish after that pops automatically.
 - Pre-existing Task 23 (onboarded lecturer "New course" landing on onboarding step 0) still open.
+
+---
+Task ID: 27
+Agent: Z.ai Code (main)
+Task: Offline-tolerant boot — "go ahead" on restoring saved sessions when the server is unreachable + explain login-offline limits.
+
+Work Log:
+- New src/lib/session-cache.ts: readCachedUser/writeCachedUser/clearCachedUser over localStorage['rollmark.lastUser.v1'] (non-sensitive User profile only; token stays in lib/api.ts).
+- rollmark-app.tsx boot: on /api/auth/me OfflineError + saved token + cached user → setUser(cached) + navigate home/onboarding + toast "Offline — using your saved session" (WifiOff icon); otherwise login gate as before. Successful boot me now writes the cached user. 401 unauthorized handler additionally clears the cached user (server actively rejected → no offline restore).
+- login.tsx: finish() writes cached user; amber offline banner (role=status, WifiOff) shown when navigator.onLine false with online/offline listeners; offline submit → inline form error explaining sign-in needs internet + that saved sessions work offline.
+- Sign-out clears the cache in both places: shell.tsx logout + settings.tsx signOut.
+- Deleted dead src/components/app/class-check-app.tsx (pre-rename shell, unused since page.tsx renders rollmark-app).
+- E2E (agent-browser): signed in throwaway onboarded lecturer → rollmark.lastUser.v1 written; set offline + reload → boot restored session to Home with "Offline — using your saved session" toast (screenshot /tmp/rm-offline-restore.png; data sections show retry buttons offline as expected); sign out offline → login screen shows offline banner; offline submit → inline "You are offline — signing in needs an internet connection…" error (screenshot /tmp/rm-offline-login.png); back online → banner auto-clears.
+- Cleanup: throwaway user deleted; DB verified = user's real data only (admin@rollmark.edu, abubakarim78@gmail.com, SPS 201, 0 students); browser storage cleared; lint clean; tsc clean (src) after also removing broken leftover students/[id]/qr/route.ts (dead PIN/QR code, referenced removed helpers — was breaking src typecheck); dev.log clean.
+
+Stage Summary:
+- Opening the installed PWA offline now restores the last signed-in session and goes straight to work; attendance marks made offline queue and auto-sync (existing offline.ts machinery). Fresh devices still require online sign-in (credentials must be verified server-side).
+- Login screen communicates offline state instead of failing silently.
+
+---
+Task ID: 28
+Agent: Z.ai Code (main)
+Task: "anytime I save a course or students … the database is wiped" — diagnose + add storage-persistence guard.
+
+Work Log:
+- Inspected sandbox DB: user's real data INTACT and dated Sep 16 (abubakarim78@gmail.com lecturer, PAHM dept, SPS 201 course) — survived every session since, single DB file (db/custom.db, absolute DATABASE_URL, no split-brain duplicates). Conclusion: nothing in the preview/dev environment wipes data; loss is happening on the user's own deployed instance (ephemeral container filesystem, redeploy without mounted volume, `docker compose down -v`, or checking a different environment than the one saved to).
+- deploy/bootstrap.ts hardening: derives DB dir from DATABASE_URL; writes .rollmark-instance marker file on first boot; on later boots with an EMPTY users table + marker present, logs a loud boxed warning ("DATABASE IS EMPTY BUT THIS STORAGE HAS RUN ROLLMARK BEFORE … disk is NOT persistent … mount a volume / attach a persistent disk"). Guard runs regardless of BOOTSTRAP_* env so it always fires.
+- Explanation for user: how to verify persistence (create record → docker compose restart → check; docker volume inspect rollmark-db) and the common wipe causes.
+
+Stage Summary:
+- Deployments now self-diagnose non-persistent storage at startup instead of silently recreating a fresh DB (bootstrap also silently recreates the admin on an empty DB, which masked the wipe).
+- User data in the dev sandbox confirmed untouched by any E2E cleanup (only throwaway entities deleted each task).

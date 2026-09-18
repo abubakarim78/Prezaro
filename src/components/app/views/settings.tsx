@@ -33,6 +33,7 @@ import type {
   TestEmailResponse,
 } from '@/lib/types'
 import { api, getErrorMessage, clearAuthToken } from '@/lib/api'
+import { clearCachedUser } from '@/lib/session-cache'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -242,6 +243,7 @@ export default function SettingsView() {
       // ignore — clear local session regardless
     }
     clearAuthToken()
+    clearCachedUser()
     setUser(null)
     replace('login')
   }

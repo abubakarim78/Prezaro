@@ -32,6 +32,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { api, clearAuthToken } from '@/lib/api'
+import { clearCachedUser } from '@/lib/session-cache'
 import { pendingCount } from '@/lib/offline'
 import { toast } from 'sonner'
 
@@ -84,6 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       // ignore
     }
     clearAuthToken()
+    clearCachedUser()
     setUser(null)
     replace('login')
     toast('Signed out')

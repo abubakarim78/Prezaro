@@ -3,11 +3,11 @@
 import { useEffect } from 'react'
 import { ThemeProvider } from 'next-themes'
 import { useAppStore } from '@/lib/store'
-import { api, getErrorMessage, clearAuthToken, setUnauthorizedHandler } from '@/lib/api'
+import { api, getErrorMessage, clearAuthToken, getAuthToken, setUnauthorizedHandler, OfflineError } from '@/lib/api'
 import { flushQueue, pendingCount } from '@/lib/offline'
-import { OfflineError } from '@/lib/api'
+import { clearCachedUser, readCachedUser, writeCachedUser } from '@/lib/session-cache'
 import { toast } from 'sonner'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { watchForUpdates } from '@/lib/pwa'
 
@@ -88,6 +88,7 @@ function RollmarkInner() {
     setUnauthorizedHandler(() => {
       const hadUser = useAppStore.getState().user !== null
       clearAuthToken()
+      clearCachedUser()
       const s = useAppStore.getState()
       s.setUser(null)
       s.setOpenSession(null)
@@ -101,6 +102,7 @@ function RollmarkInner() {
         if (!alive) return
         if (user) {
           setUser(user)
+          writeCachedUser(user)
           replace(user.onboarded ? 'home' : 'onboarding')
         } else {
           // No valid session (cookie blocked / token expired) — clean slate.
@@ -108,8 +110,21 @@ function RollmarkInner() {
           replace('login')
         }
       } catch (e) {
-        // offline but we may still have a cached session; treat as login gate
         if (!alive) return
+        // Server unreachable: fall back to the cached session when one
+        // exists, so attendance keeps working from an offline PWA launch.
+        if (e instanceof OfflineError && getAuthToken()) {
+          const cached = readCachedUser()
+          if (cached) {
+            setUser(cached)
+            replace(cached.onboarded ? 'home' : 'onboarding')
+            toast('Offline — using your saved session', {
+              description: `Signed in as ${cached.email}. Attendance marked now syncs once you reconnect.`,
+              icon: <WifiOff className="h-4 w-4 text-primary" />,
+            })
+            return
+          }
+        }
         replace('login')
         if (!(e instanceof OfflineError)) {
           console.warn(getErrorMessage(e))
