@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — App store (zustand)
+// Prezaro — App store (zustand)
 // Lightweight view-router + app state. The whole app is a
 // single-route PWA; `view` drives which screen renders.
 // ============================================================

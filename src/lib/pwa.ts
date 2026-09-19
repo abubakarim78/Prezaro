@@ -1,7 +1,7 @@
 /**
  * PWA update plumbing.
  *
- * Rollmark's service worker (`public/sw.js`) calls `skipWaiting()` +
+ * Prezaro's service worker (`public/sw.js`) calls `skipWaiting()` +
  * `clients.claim()`, so a newly deployed worker activates immediately —
  * but the page keeps running the old JS bundle until it reloads.
  * `watchForUpdates()` surfaces a persistent "New version ready — Restart"
@@ -33,13 +33,13 @@ const RECHECK_THROTTLE_MS = 60 * 1000
 const POLL_INTERVAL_MS = 4 * 60 * 1000
 
 /** localStorage: last service-worker version this device has run. */
-const VERSION_KEY = 'rollmark.swVersion.v1'
+const VERSION_KEY = 'prezaro.swVersion.v1'
 
 /** sessionStorage: set when an update toast fires; the next boot (the
  *  reload after "Restart") records the new version instead of re-prompting.
  *  Cleared automatically when the app is fully closed, so a user who
  *  dismisses the toast and never restarts gets prompted again next launch. */
-const RESTART_FLAG_KEY = 'rollmark.swUpdateSeen.v1'
+const RESTART_FLAG_KEY = 'prezaro.swUpdateSeen.v1'
 
 function readVersion(): string | null {
   try {

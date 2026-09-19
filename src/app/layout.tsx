@@ -15,17 +15,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Rollmark — Face Attendance",
-    template: "%s · Rollmark",
+    default: "Prezaro — Face Attendance",
+    template: "%s · Prezaro",
   },
   description:
     "Face-recognition attendance for lecture halls. Enroll students, scan the room, get trusted attendance data in under two minutes.",
-  applicationName: "Rollmark",
+  applicationName: "Prezaro",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Rollmark",
+    title: "Prezaro",
   },
   formatDetection: {
     telephone: false,

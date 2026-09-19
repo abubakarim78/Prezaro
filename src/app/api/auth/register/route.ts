@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     // Notifications — fire-and-forget so sign-up never waits on mail I/O.
     queueEmail({
       to: user.email,
-      subject: 'Welcome to Rollmark',
+      subject: 'Welcome to Prezaro',
       html: welcomeEmailHtml(user.name),
       type: 'WELCOME',
       meta: { userId: user.id, role },

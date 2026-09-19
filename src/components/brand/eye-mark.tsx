@@ -1,4 +1,4 @@
-// Rollmark brand glyph — an eye that watches the room, glances around,
+// Prezaro brand glyph — an eye that watches the room, glances around,
 // and blinks on its own (pure CSS keyframes from globals.css; honours
 // prefers-reduced-motion). `currentColor` drives the ink so it works on
 // primary tiles, muted surfaces and plain text alike.

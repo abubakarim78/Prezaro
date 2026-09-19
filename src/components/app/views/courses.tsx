@@ -1,7 +1,7 @@
 'use client'
 
 // ============================================================
-// Rollmark — Your courses
+// Prezaro — Your courses
 // Course management for onboarded lecturers: list, add, edit.
 // Deliberately its own screen — NOT the onboarding wizard.
 // ============================================================

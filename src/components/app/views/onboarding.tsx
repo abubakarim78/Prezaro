@@ -252,7 +252,7 @@ export default function OnboardingView() {
             <FaceScanMark className="h-5 w-5" />
           </div>
           <div className="leading-tight">
-            <p className="font-semibold tracking-tight">Rollmark</p>
+            <p className="font-semibold tracking-tight">Prezaro</p>
             <p className="text-[11px] text-muted-foreground">
               Set up your lecturer profile
             </p>

@@ -128,7 +128,7 @@ export default function LoginView() {
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
             <FaceScanMark className="h-9 w-9" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">Rollmark</h1>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight">Prezaro</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Face attendance for lecture halls
           </p>
@@ -277,7 +277,7 @@ export default function LoginView() {
               </span>
             ) : (
               <span className="text-muted-foreground">
-                New to Rollmark?{' '}
+                New to Prezaro?{' '}
                 <button
                   type="button"
                   onClick={() => switchMode('signup')}

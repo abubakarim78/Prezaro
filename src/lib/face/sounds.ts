@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — Enrollment capture sounds
+// Prezaro — Enrollment capture sounds
 // Tiny Web Audio synth (no asset files): works offline, adds
 // zero download weight, and can't 404. The AudioContext is
 // created lazily and "unlocked" from the Continue-to-capture

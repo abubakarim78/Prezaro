@@ -1,5 +1,5 @@
-/* Rollmark service worker — offline-first app shell */
-const VERSION = 'rollmark-v7'
+/* Prezaro service worker — offline-first app shell */
+const VERSION = 'prezaro-v1'
 const SHELL_CACHE = `${VERSION}-shell`
 const STATIC_CACHE = `${VERSION}-static`
 

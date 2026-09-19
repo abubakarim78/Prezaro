@@ -35,7 +35,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       )
     }
 
-    const filename = `rollmark-${session.course.code}-${format(session.startedAt, 'yyyy-MM-dd')}-attendance.csv`
+    const filename = `prezaro-${session.course.code}-${format(session.startedAt, 'yyyy-MM-dd')}-attendance.csv`
     return csvResponse(filename, lines)
   })
 }

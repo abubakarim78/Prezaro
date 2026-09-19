@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState, StatCard, StatusPill } from '@/components/app/shared'
 import { cn } from '@/lib/utils'
 
-const INSTALL_DISMISS_KEY = 'rollmark.installDismissed.v1'
+const INSTALL_DISMISS_KEY = 'prezaro.installDismissed.v1'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -312,7 +312,7 @@ export default function HomeView() {
                 <Download className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1 leading-tight">
-                <p className="text-sm font-semibold">Install Rollmark on your phone</p>
+                <p className="text-sm font-semibold">Install Prezaro on your phone</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Works offline, opens full-screen, no app store needed.
                 </p>

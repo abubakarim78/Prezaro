@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — per-user app settings (stored as JSON on User)
+// Prezaro — per-user app settings (stored as JSON on User)
 // Defaults: { atRiskThreshold: 75, defaultMode: 'WALKTHROUGH' }
 // ============================================================
 import { db } from '@/lib/db'

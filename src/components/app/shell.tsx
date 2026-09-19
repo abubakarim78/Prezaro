@@ -116,7 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <FaceScanMark className="h-5 w-5" />
           </div>
           <div className="leading-tight">
-            <p className="font-semibold tracking-tight">Rollmark</p>
+            <p className="font-semibold tracking-tight">Prezaro</p>
             <p className="text-[11px] text-muted-foreground">Face attendance</p>
           </div>
         </div>
@@ -213,7 +213,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <FaceScanMark className="h-[18px] w-[18px]" />
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <p className="font-semibold tracking-tight text-sm">Rollmark</p>
+              <p className="font-semibold tracking-tight text-sm">Prezaro</p>
               <p className="text-[10px] text-muted-foreground truncate">
                 {user.departmentName ?? 'Set up your department'}
               </p>

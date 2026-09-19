@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — API client (fetch wrapper)
+// Prezaro — API client (fetch wrapper)
 //
 // Auth strategy (dual-mode):
 //   • Bearer token in localStorage — works everywhere, including

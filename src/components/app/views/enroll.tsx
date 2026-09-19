@@ -1,7 +1,7 @@
 'use client'
 
 // ============================================================
-// Rollmark — Guided face enrollment
+// Prezaro — Guided face enrollment
 // consent → 3-pose guided capture (4 descriptors) → save.
 // Full-screen, no app shell.
 // ============================================================

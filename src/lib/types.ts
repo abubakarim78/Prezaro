@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — Shared domain types (single source of truth)
+// Prezaro — Shared domain types (single source of truth)
 // Every view + API route codes against these shapes.
 // ============================================================
 
@@ -225,7 +225,12 @@ export interface EmailLogItem {
 }
 
 export interface EmailsResponse {
-  config: { smtpConfigured: boolean; host: string | null; from: string | null }
+  config: {
+    smtpConfigured: boolean
+    provider?: 'resend' | 'smtp' | 'none'
+    host: string | null
+    from: string | null
+  }
   emails: EmailLogItem[]
 }
 

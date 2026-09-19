@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — Face engine
+// Prezaro — Face engine
 // Loads the vendored face-api.js bundle (tfjs included) + model
 // weights, wraps camera + detection + overlay drawing.
 // Browser-only: every export assumes a DOM environment.
@@ -39,7 +39,7 @@ export type FacingMode = 'user' | 'environment'
 
 // ---------- Script + model loading (singleton) --------------
 
-const SCRIPT_ID = 'rollmark-faceapi'
+const SCRIPT_ID = 'prezaro-faceapi'
 const SCRIPT_SRC = '/vendor/face-api.js'
 const MODELS_URI = '/models'
 

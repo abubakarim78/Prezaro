@@ -1,4 +1,4 @@
-// Rollmark brand glyph — the Face ID scan mark. The corner brackets and
+// Prezaro brand glyph — the Face ID scan mark. The corner brackets and
 // smile are static; the two eyes blink on their own (pure CSS keyframes
 // from globals.css, honours prefers-reduced-motion). `currentColor`
 // drives the ink so it works on primary tiles and muted surfaces alike.

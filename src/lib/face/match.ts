@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — Face matching (pure functions, no DOM)
+// Prezaro — Face matching (pure functions, no DOM)
 // Runs anywhere: browser scan loop, node tests, workers.
 // ============================================================
 

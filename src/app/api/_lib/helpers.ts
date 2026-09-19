@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — shared API route helpers (server-only)
+// Prezaro — shared API route helpers (server-only)
 // Error wrapper, DTO mappers, scoping & access guards.
 //
 // Scoping model (documented for all routes):
@@ -21,22 +21,25 @@ import type {
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 // Re-export error classes so route handlers can import them from one place.
-export {
-  ApiError,
-  BadRequestError,
-  UnauthorizedError,
-  ForbiddenError,
-  NotFoundError,
-  ConflictError,
-} from '@/lib/auth'
-export type { AuthUser } from '@/lib/auth'
 import {
   ApiError,
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
+  UnauthorizedError,
   type AuthUser,
 } from '@/lib/auth'
+
+export {
+  ApiError,
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+  type AuthUser,
+}
 import { getUserSettings } from '@/lib/settings'
 import type {
   AttendanceRecord as AttendanceRecordDTO,

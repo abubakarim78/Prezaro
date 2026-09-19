@@ -1,11 +1,11 @@
-// Rollmark — Prisma schema (SQLite)
+// Prezaro — Prisma schema (PostgreSQL)
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

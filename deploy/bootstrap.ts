@@ -1,36 +1,28 @@
-// Rollmark — one-time admin bootstrap for a fresh production database.
-// Runs on every container start; creates the first ADMIN user only when the
-// users table is empty and BOOTSTRAP_EMAIL/BOOTSTRAP_PASSWORD are provided.
-//
-// Storage-persistence guard: a marker file is written next to the database
-// on first boot. If a later boot finds an EMPTY database but the marker is
-// still present, the storage holding SQLite is not persistent (container
-// filesystem reset, redeploy without the volume, etc.) and previous
-// courses/students were lost — this is logged loudly so the operator can
-// attach a persistent volume/disk before real attendance data is trusted.
+// Prezaro — one-time admin bootstrap for a fresh production database.
+// Runs on container start; creates the first ADMIN user when the
+// users table is empty and credentials are provided.
 //
 // Optional env vars:
-//   BOOTSTRAP_EMAIL        login email for the first account
+//   BOOTSTRAP_EMAIL        login email for the first account (defaults to abubakarima1969@uds.edu.gh)
 //   BOOTSTRAP_PASSWORD     login password (choose a strong one!)
-//   BOOTSTRAP_NAME         display name  (default "Department Admin")
+//   BOOTSTRAP_NAME         display name  (default "Prezaro Administrator")
 //   BOOTSTRAP_DEPARTMENT   department name — created + linked if provided
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { PrismaClient } from '@prisma/client'
-import bcrypt from 'bcryptjs'
+import { hash } from 'bcryptjs'
 
 const db = new PrismaClient()
 
-/** Directory holding the SQLite file, derived from DATABASE_URL. */
-function databaseDir(): string {
+/** Directory holding local files, derived from DATABASE_URL if file-based. */
+function databaseDir(): string | null {
   const raw = process.env.DATABASE_URL ?? ''
   if (raw.startsWith('file:')) {
     const file = raw.slice('file:'.length)
-    // Prisma resolves relative paths against the prisma/ schema directory.
     return path.isAbsolute(file) ? path.dirname(file) : path.dirname(path.resolve(process.cwd(), 'prisma', file))
   }
-  return '/app/db'
+  return null
 }
 
 function deptCode(name: string): string {
@@ -44,48 +36,52 @@ function deptCode(name: string): string {
 
 async function main(): Promise<void> {
   const dir = databaseDir()
-  const markerPath = path.join(dir, '.rollmark-instance')
 
-  // ---- Storage-persistence guard (runs regardless of bootstrap env) ----
-  const userCount = await db.user.count()
-  const markerExists = fs.existsSync(markerPath)
+  // ---- Storage-persistence guard for SQLite (if SQLite is used) ----
+  if (dir) {
+    const markerPath = path.join(dir, '.prezaro-instance')
+    const userCount = await db.user.count()
+    const markerExists = fs.existsSync(markerPath)
 
-  if (userCount === 0 && markerExists) {
-    console.error('==============================================================')
-    console.error('[rollmark] WARNING: DATABASE IS EMPTY BUT THIS STORAGE HAS RUN')
-    console.error('[rollmark] ROLLMARK BEFORE (persistence marker found).')
-    console.error('[rollmark] The disk holding your SQLite database is NOT persistent —')
-    console.error('[rollmark] previously saved courses, students and attendance were')
-    console.error('[rollmark] lost during a restart/redeploy.')
-    console.error('[rollmark] Fix: mount a volume at the database directory (docker')
-    console.error('[rollmark] compose does this via the rollmark-db volume) or attach')
-    console.error('[rollmark] a persistent disk, then redeploy.')
-    console.error('==============================================================')
-  }
+    if (userCount === 0 && markerExists) {
+      console.error('==============================================================')
+      console.error('[prezaro] WARNING: DATABASE IS EMPTY BUT THIS STORAGE HAS RUN')
+      console.error('[prezaro] PREZARO BEFORE (persistence marker found).')
+      console.error('[prezaro] The disk holding your SQLite database is NOT persistent —')
+      console.error('[prezaro] previously saved courses, students and attendance were')
+      console.error('[prezaro] lost during a restart/redeploy.')
+      console.error('==============================================================')
+    }
 
-  if (!markerExists) {
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(markerPath, new Date().toISOString())
-    if (userCount > 0) {
-      console.log('[rollmark] persistence marker written for existing database.')
-    } else {
-      console.log('[rollmark] first boot on this storage — persistence marker written.')
+    if (!markerExists) {
+      try {
+        fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(markerPath, new Date().toISOString())
+        console.log('[prezaro] storage persistence marker written.')
+      } catch {
+        // ignore if read-only
+      }
     }
   }
 
   // ---- One-time admin bootstrap ----
-  const email = process.env.BOOTSTRAP_EMAIL?.trim().toLowerCase()
+  const email = (process.env.BOOTSTRAP_EMAIL?.trim().toLowerCase() || 'abubakarima1969@uds.edu.gh')
   const password = process.env.BOOTSTRAP_PASSWORD
-  const name = process.env.BOOTSTRAP_NAME?.trim() || 'Department Admin'
-  const departmentName = process.env.BOOTSTRAP_DEPARTMENT?.trim()
+  const name = process.env.BOOTSTRAP_NAME?.trim() || 'Prezaro Administrator'
+  const departmentName = process.env.BOOTSTRAP_DEPARTMENT?.trim() || 'General Administration'
 
-  if (!email || !password) {
-    console.log('[bootstrap] BOOTSTRAP_EMAIL / BOOTSTRAP_PASSWORD not set — skipping.')
+  if (!password) {
+    console.log('[bootstrap] BOOTSTRAP_PASSWORD not set — skipping admin bootstrap.')
     return
   }
 
-  if (userCount > 0) {
-    console.log(`[bootstrap] ${userCount} user(s) already exist — skipping.`)
+  // Check if admin user already exists
+  const existingUser = await db.user.findUnique({
+    where: { email },
+  })
+
+  if (existingUser) {
+    console.log(`[bootstrap] admin user (${email}) already exists — skipping creation.`)
     return
   }
 
@@ -99,7 +95,7 @@ async function main(): Promise<void> {
     departmentId = dept.id
   }
 
-  const passwordHash = await bcrypt.hash(password, 10)
+  const passwordHash = await hash(password, 10)
   await db.user.create({
     data: {
       email,
@@ -110,7 +106,7 @@ async function main(): Promise<void> {
       departmentId,
     },
   })
-  console.log(`[bootstrap] created admin user: ${email}`)
+  console.log(`[bootstrap] successfully created admin user: ${email}`)
 }
 
 main()

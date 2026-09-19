@@ -1,5 +1,4 @@
-{$DOMAIN}
-
-reverse_proxy app:3000
-
-encode gzip
+{$DOMAIN:localhost} {
+	reverse_proxy app:3000
+	encode gzip
+}

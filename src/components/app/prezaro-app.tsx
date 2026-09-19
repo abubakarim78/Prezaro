@@ -30,15 +30,15 @@ import { AppShell } from '@/components/app/shell'
 /** Views rendered full-screen without the nav shell */
 const IMMERSIVE_VIEWS = new Set(['login', 'onboarding', 'scan', 'enroll', 'review'])
 
-export default function RollmarkApp() {
+export default function PrezaroApp() {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <RollmarkInner />
+      <PrezaroInner />
     </ThemeProvider>
   )
 }
 
-function RollmarkInner() {
+function PrezaroInner() {
   const {
     booted,
     user,
@@ -149,7 +149,7 @@ function RollmarkInner() {
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
           <FaceScanMark className="h-8 w-8" />
         </div>
-        <p className="text-sm text-muted-foreground font-medium">Rollmark</p>
+        <p className="text-sm text-muted-foreground font-medium">Prezaro</p>
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" />
       </div>
     )

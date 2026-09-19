@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — server-only email notifications (outbox pattern)
+// Prezaro — server-only email notifications (outbox pattern)
 //
 // Delivery modes:
 //  - SMTP configured (SMTP_HOST env) → real delivery via nodemailer,
@@ -21,19 +21,44 @@ export type EmailType =
   | 'COURSE_ENROLLMENT'
   | 'TEST'
 
-export interface SmtpStatus {
+export interface EmailConfigStatus {
   configured: boolean
+  provider: 'resend' | 'smtp' | 'none'
   host: string | null
   from: string | null
 }
 
-/** Read SMTP configuration from the environment (cheap, no I/O). */
-export function smtpStatus(): SmtpStatus {
+export type SmtpStatus = EmailConfigStatus
+
+/** Read email provider configuration from the environment (cheap, no I/O). */
+export function emailProviderStatus(): EmailConfigStatus {
+  const resendKey = process.env.RESEND_API_KEY?.trim()
+  if (resendKey) {
+    const from =
+      process.env.RESEND_FROM?.trim() ||
+      process.env.SMTP_FROM?.trim() ||
+      'Prezaro <onboarding@resend.dev>'
+    return {
+      configured: true,
+      provider: 'resend',
+      host: 'api.resend.com',
+      from,
+    }
+  }
+
   const host = process.env.SMTP_HOST?.trim() || null
   const from =
     process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || null
-  return { configured: Boolean(host), host, from }
+  return {
+    configured: Boolean(host),
+    provider: host ? 'smtp' : 'none',
+    host,
+    from,
+  }
 }
+
+/** Backwards-compatible alias for existing call sites. */
+export const smtpStatus = emailProviderStatus
 
 let cachedTransport: { key: string; transporter: Transporter } | null = null
 
@@ -73,23 +98,49 @@ export interface OutgoingEmail {
 export async function sendAppEmail(email: OutgoingEmail): Promise<
   { status: 'SENT' | 'SIMULATED' | 'FAILED'; error: string | null }
 > {
-  const status = smtpStatus()
+  const status = emailProviderStatus()
   let delivery: 'SENT' | 'SIMULATED' | 'FAILED' = 'SIMULATED'
   let error: string | null = null
 
   if (status.configured) {
     try {
-      await getTransport().sendMail({
-        from: status.from ?? 'Rollmark <no-reply@rollmark.app>',
-        to: email.to,
-        subject: email.subject,
-        html: email.html,
-      })
+      if (status.provider === 'resend') {
+        const apiKey = process.env.RESEND_API_KEY!.trim()
+        const from = status.from || 'Prezaro <onboarding@resend.dev>'
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from,
+            to: [email.to],
+            subject: email.subject,
+            html: email.html,
+          }),
+        })
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as {
+            message?: string
+          }
+          throw new Error(
+            errData.message || `Resend API returned status ${res.status}`,
+          )
+        }
+      } else {
+        await getTransport().sendMail({
+          from: status.from ?? 'Prezaro <no-reply@prezaro.app>',
+          to: email.to,
+          subject: email.subject,
+          html: email.html,
+        })
+      }
       delivery = 'SENT'
     } catch (err: unknown) {
       delivery = 'FAILED'
-      error = err instanceof Error ? err.message : 'Unknown SMTP error'
-      console.error(`[email] ${email.type} → ${email.to} failed:`, error)
+      error = err instanceof Error ? err.message : 'Unknown email delivery error'
+      console.error(`[email] ${email.type} → ${email.to} failed (${status.provider}):`, error)
     }
   }
 
@@ -126,7 +177,7 @@ export function queueEmail(email: OutgoingEmail): void {
 // Table-based markup renders reliably across email clients.
 
 const BRAND = {
-  name: 'Rollmark',
+  name: 'Prezaro',
   color: '#567031',
   colorDark: '#43571f',
   wash: '#eef3e6',

@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       config: {
         smtpConfigured: status.configured,
+        provider: status.provider,
         host: status.host,
         from: status.from,
       },

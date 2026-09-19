@@ -1,5 +1,5 @@
 // ============================================================
-// Rollmark — Offline-tolerant session cache
+// Prezaro — Offline-tolerant session cache
 //
 // Remembers the last user that signed in on this device so the app
 // can keep working when the server is unreachable at boot (offline
@@ -12,7 +12,7 @@
 
 import type { User } from './types'
 
-const KEY = 'rollmark.lastUser.v1'
+const KEY = 'prezaro.lastUser.v1'
 
 export function readCachedUser(): User | null {
   try {

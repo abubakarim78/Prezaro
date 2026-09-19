@@ -1,7 +1,7 @@
 'use client'
 
 // ============================================================
-// Rollmark — Scan view (the hero screen)
+// Prezaro — Scan view (the hero screen)
 // select → loading → live. Full-screen, no app shell.
 // Face check-ins — walkthrough or kiosk, single-capture verification.
 // ============================================================
