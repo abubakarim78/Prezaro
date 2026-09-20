@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Clock,
   Download,
+  MapPin,
   Play,
   ScanFace,
   UserPlus,
@@ -202,67 +203,87 @@ export default function HomeView() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
               className={cn(
-                'flex items-center gap-3 rounded-2xl border p-4 shadow-sm',
+                'rounded-2xl border p-4 shadow-sm space-y-3 transition-all',
                 upcomingToday.status === 'ongoing'
-                  ? 'border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-card'
-                  : 'border-primary/30 bg-gradient-to-r from-primary/15 via-primary/5 to-card'
+                  ? 'border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 via-emerald-500/5 to-card'
+                  : 'border-primary/30 bg-gradient-to-br from-primary/15 via-primary/5 to-card'
               )}
             >
-              <div
-                className={cn(
-                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-                  upcomingToday.status === 'ongoing'
-                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-primary/20 text-primary'
-                )}
-              >
-                <CalendarDays className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1 leading-tight">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-primary">
+              {/* Card Header: Icon + Code + Live Status */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={cn(
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+                      upcomingToday.status === 'ongoing'
+                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-primary/20 text-primary'
+                    )}
+                  >
+                    <CalendarDays className="h-4 w-4" />
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-xs font-bold border-primary/30 bg-primary/10 text-primary px-2 py-0.5"
+                  >
                     {upcomingToday.schedule.courseCode}
+                  </Badge>
+                </div>
+
+                {upcomingToday.status === 'ongoing' ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Class in progress
                   </span>
-                  {upcomingToday.status === 'ongoing' ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Class in progress
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-semibold text-muted-foreground">
-                      Starts in {upcomingToday.minutesLeft} mins
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary shrink-0">
+                    <Clock className="h-3 w-3" />
+                    Starts in {upcomingToday.minutesLeft}m
+                  </span>
+                )}
+              </div>
+
+              {/* Course Title & Time Details */}
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold tracking-tight text-foreground truncate">
+                  {upcomingToday.schedule.courseTitle}
+                </h3>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                    <Clock className="h-3.5 w-3.5 text-primary" />
+                    {upcomingToday.schedule.startTime} – {upcomingToday.schedule.endTime}
+                  </span>
+                  {upcomingToday.schedule.venue && (
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                      {upcomingToday.schedule.venue}
                     </span>
                   )}
                 </div>
-                <p className="truncate text-sm font-semibold mt-0.5">
-                  {upcomingToday.schedule.courseTitle}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {upcomingToday.schedule.startTime} – {upcomingToday.schedule.endTime}
-                  {upcomingToday.schedule.venue ? ` · ${upcomingToday.schedule.venue}` : ''}
-                </p>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+
+              {/* 2-Button Action Bar: Clean, side-by-side grid that NEVER overlaps */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="min-h-10 font-semibold text-xs gap-1.5 bg-background/80 hover:bg-background border-border/80"
+                  className="min-h-11 font-semibold text-xs gap-1.5 rounded-xl border-border bg-background/80 hover:bg-background active:bg-accent"
                   onClick={() =>
                     navigate('schedule', {
                       rescheduleId: upcomingToday.schedule.id,
                     })
                   }
                 >
-                  <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                  <CalendarClock className="h-4 w-4 text-primary" />
                   Reschedule
                 </Button>
                 <Button
                   size="sm"
                   className={cn(
-                    'min-h-10 font-bold text-xs gap-1.5',
+                    'min-h-11 font-bold text-xs gap-1.5 rounded-xl shadow-xs',
                     upcomingToday.status === 'ongoing'
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : ''
+                      : 'bg-primary hover:bg-primary/90'
                   )}
                   onClick={() =>
                     navigate('scan', {

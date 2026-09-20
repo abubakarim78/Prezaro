@@ -278,7 +278,7 @@ export async function detectSingle(
   inputSize = 320
 ): Promise<FaceResult | undefined> {
   const res = await faceapi
-    .detectSingleFace(input, tinyOpts(faceapi, inputSize, 0.5))
+    .detectSingleFace(input, tinyOpts(faceapi, inputSize, 0.35))
     .withFaceLandmarks()
     .withFaceDescriptor()
   return res ? toFaceResult(res) : undefined
@@ -290,7 +290,7 @@ export async function detectAll(
   inputSize = 256
 ): Promise<FaceResult[]> {
   const results = await faceapi
-    .detectAllFaces(input, tinyOpts(faceapi, inputSize, 0.5))
+    .detectAllFaces(input, tinyOpts(faceapi, inputSize, 0.35))
     .withFaceLandmarks()
     .withFaceDescriptors()
   return results.map(toFaceResult)
@@ -300,18 +300,16 @@ export async function detectAll(
 
 /**
  * Frame luminance below this (0–255) counts as "dim" and triggers the
- * gamma boost. Tuned so a normal bright room (~150+) is never touched,
+ * GPU boost. Tuned so a normal bright room (~150+) is never touched,
  * while a dim lecture hall (~60–95) gets a strong lift.
  */
 const DIM_MEAN = 108
 const TARGET_MEAN = 0.46 // post-gamma target luminance (0–1)
-const GAMMA_MIN = 1
-const GAMMA_MAX = 2.8
 
 interface EnhanceResult {
   /** What to feed the detector — the video itself or an enhanced canvas. */
   source: HTMLVideoElement | HTMLCanvasElement
-  /** True when the returned source is an enhanced (gamma-corrected) canvas. */
+  /** True when the returned source is an enhanced canvas. */
   enhanced: boolean
   /** Mean frame luminance 0–255 (before enhancement). */
   brightness: number
@@ -319,19 +317,13 @@ interface EnhanceResult {
 
 let sampleCanvas: HTMLCanvasElement | null = null
 let enhanceCanvas: HTMLCanvasElement | null = null
-const gammaLut = new Uint8Array(256)
 
 /**
  * Adaptive low-light pipeline:
  *  1. Sample the frame cheaply (80×45) to get mean luminance.
- *  2. If the room is dim, compute a gamma that lifts the mean toward
- *     TARGET_MEAN, apply it through a 256-entry LUT on a full-frame canvas
- *     and run detection on THAT canvas (noise stays, shadows open up).
- *  3. Mirror the same lift onto the visible <video> via a CSS filter so
- *     the preview matches what the detector sees.
- *
- * The enhance canvas has the same pixel dimensions as the video, so face
- * box coordinates map identically for the overlay.
+ *  2. If the room is dim, apply a hardware-accelerated GPU brightness/contrast
+ *     lift via Canvas2D filter (0ms CPU time, never blocks the main thread).
+ *  3. Mirror the same lift onto the visible <video> via CSS filter.
  */
 export function enhanceForDetection(video: HTMLVideoElement): EnhanceResult {
   const vw = video.videoWidth
@@ -361,7 +353,6 @@ export function enhanceForDetection(video: HTMLVideoElement): EnhanceResult {
   let sum = 0
   const n = sw * sh
   for (let i = 0; i < data.length; i += 4) {
-    // luma 601: 0.299R + 0.587G + 0.114B
     sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
   }
   const mean = sum / n
@@ -372,15 +363,9 @@ export function enhanceForDetection(video: HTMLVideoElement): EnhanceResult {
     return { source: video, enhanced: false, brightness: mean }
   }
 
-  // ---- 2. adaptive gamma through a LUT --------------------------
+  // ---- 2. adaptive GPU filter (0ms CPU time) --------------------
   const mean01 = Math.max(0.02, Math.min(0.9, mean / 255))
-  const gamma = Math.max(
-    GAMMA_MIN,
-    Math.min(GAMMA_MAX, Math.log(TARGET_MEAN) / Math.log(mean01))
-  )
-  for (let v = 0; v < 256; v++) {
-    gammaLut[v] = Math.round(255 * Math.pow(v / 255, 1 / gamma))
-  }
+  const boost = Math.max(1.15, Math.min(2.2, Math.pow(TARGET_MEAN / mean01, 0.7)))
 
   if (!enhanceCanvas) enhanceCanvas = document.createElement('canvas')
   const ec = enhanceCanvas
@@ -388,20 +373,15 @@ export function enhanceForDetection(video: HTMLVideoElement): EnhanceResult {
     ec.width = vw
     ec.height = vh
   }
-  const ectx = ec.getContext('2d', { willReadFrequently: true })
+  const ectx = ec.getContext('2d')
   if (!ectx) return { source: video, enhanced: false, brightness: mean }
-  ectx.drawImage(video, 0, 0)
-  const img = ectx.getImageData(0, 0, vw, vh)
-  const px = img.data
-  for (let i = 0; i < px.length; i += 4) {
-    px[i] = gammaLut[px[i]]
-    px[i + 1] = gammaLut[px[i + 1]]
-    px[i + 2] = gammaLut[px[i + 2]]
-  }
-  ectx.putImageData(img, 0, 0)
+
+  // Hardware-accelerated GPU filter
+  ectx.filter = `brightness(${boost.toFixed(2)}) contrast(1.08)`
+  ectx.drawImage(video, 0, 0, vw, vh)
+  ectx.filter = 'none'
 
   // ---- 3. preview boost so the operator sees the same thing -----
-  const boost = Math.max(1, Math.min(2.3, Math.pow(TARGET_MEAN / mean01, 0.7)))
   video.style.filter = `brightness(${boost.toFixed(2)}) contrast(1.05)`
 
   return { source: ec, enhanced: true, brightness: mean }

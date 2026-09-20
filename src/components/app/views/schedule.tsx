@@ -72,6 +72,50 @@ const RESCHEDULE_REASONS = [
   'Special make-up lecture',
 ]
 
+const TIME_SLOTS = [
+  { value: '06:00', label: '06:00 AM' },
+  { value: '06:30', label: '06:30 AM' },
+  { value: '07:00', label: '07:00 AM' },
+  { value: '07:30', label: '07:30 AM' },
+  { value: '08:00', label: '08:00 AM' },
+  { value: '08:30', label: '08:30 AM' },
+  { value: '09:00', label: '09:00 AM' },
+  { value: '09:30', label: '09:30 AM' },
+  { value: '10:00', label: '10:00 AM' },
+  { value: '10:30', label: '10:30 AM' },
+  { value: '11:00', label: '11:00 AM' },
+  { value: '11:30', label: '11:30 AM' },
+  { value: '12:00', label: '12:00 PM (Noon)' },
+  { value: '12:30', label: '12:30 PM' },
+  { value: '13:00', label: '01:00 PM (13:00)' },
+  { value: '13:30', label: '01:30 PM (13:30)' },
+  { value: '14:00', label: '02:00 PM (14:00)' },
+  { value: '14:30', label: '02:30 PM (14:30)' },
+  { value: '15:00', label: '03:00 PM (15:00)' },
+  { value: '15:30', label: '03:30 PM (15:30)' },
+  { value: '16:00', label: '04:00 PM (16:00)' },
+  { value: '16:30', label: '04:30 PM (16:30)' },
+  { value: '17:00', label: '05:00 PM (17:00)' },
+  { value: '17:30', label: '05:30 PM (17:30)' },
+  { value: '18:00', label: '06:00 PM (18:00)' },
+  { value: '18:30', label: '06:30 PM (18:30)' },
+  { value: '19:00', label: '07:00 PM (19:00)' },
+  { value: '19:30', label: '07:30 PM (19:30)' },
+  { value: '20:00', label: '08:00 PM (20:00)' },
+  { value: '20:30', label: '08:30 PM (20:30)' },
+  { value: '21:00', label: '09:00 PM (21:00)' },
+  { value: '21:30', label: '09:30 PM (21:30)' },
+  { value: '22:00', label: '10:00 PM (22:00)' },
+]
+
+function addHours(timeStr: string, hours: number): string {
+  const [h, m] = timeStr.split(':').map(Number)
+  const totalM = (h || 0) * 60 + (m || 0) + Math.round(hours * 60)
+  const newH = Math.min(23, Math.floor(totalM / 60))
+  const newM = totalM % 60
+  return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`
+}
+
 export default function ScheduleView() {
   const navigate = useAppStore((s) => s.navigate)
   const params = useAppStore((s) => s.params)
@@ -677,27 +721,68 @@ export default function ScheduleView() {
               </Select>
             </div>
 
-            {/* Start and End Times */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Start Time (24h)</Label>
-                <Input
-                  type="time"
-                  value={formStartTime}
-                  onChange={(e) => setFormStartTime(e.target.value)}
-                  className="h-11 rounded-xl font-mono text-sm"
-                  required
-                />
+            {/* Start and End Times with Selects & Duration Presets */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-3 min-w-0">
+                <div className="space-y-1.5 min-w-0">
+                  <Label className="text-xs font-semibold">Start Time</Label>
+                  <Select
+                    value={formStartTime}
+                    onValueChange={(v) => {
+                      setFormStartTime(v)
+                      if (v >= formEndTime) {
+                        setFormEndTime(addHours(v, 2))
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-11 rounded-xl min-w-0 w-full font-mono text-xs">
+                      <SelectValue placeholder="Start time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {TIME_SLOTS.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5 min-w-0">
+                  <Label className="text-xs font-semibold">End Time</Label>
+                  <Select value={formEndTime} onValueChange={setFormEndTime}>
+                    <SelectTrigger className="h-11 rounded-xl min-w-0 w-full font-mono text-xs">
+                      <SelectValue placeholder="End time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {TIME_SLOTS.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">End Time (24h)</Label>
-                <Input
-                  type="time"
-                  value={formEndTime}
-                  onChange={(e) => setFormEndTime(e.target.value)}
-                  className="h-11 rounded-xl font-mono text-sm"
-                  required
-                />
+
+              {/* Quick Duration Chips */}
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <span className="text-[11px] text-muted-foreground font-medium shrink-0">Duration:</span>
+                {[
+                  { label: '1 hr', hrs: 1 },
+                  { label: '1.5 hrs', hrs: 1.5 },
+                  { label: '2 hrs', hrs: 2 },
+                  { label: '3 hrs', hrs: 3 },
+                ].map((d) => (
+                  <button
+                    key={d.label}
+                    type="button"
+                    onClick={() => setFormEndTime(addHours(formStartTime, d.hrs))}
+                    className="text-[11px] rounded-lg border border-border bg-muted/40 px-2 py-0.5 font-medium text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all"
+                  >
+                    {d.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -716,7 +801,12 @@ export default function ScheduleView() {
                     key={vp}
                     type="button"
                     onClick={() => setFormVenue(vp)}
-                    className="text-[11px] rounded-lg border bg-muted/50 px-2 py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+                    className={cn(
+                      'text-[11px] rounded-lg border px-2.5 py-1 transition-all',
+                      formVenue === vp
+                        ? 'border-primary bg-primary text-primary-foreground font-bold shadow-xs'
+                        : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted'
+                    )}
                   >
                     {vp}
                   </button>
@@ -838,27 +928,68 @@ export default function ScheduleView() {
               </Select>
             </div>
 
-            {/* New Start and End Times */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">New Start Time</Label>
-                <Input
-                  type="time"
-                  value={reschedStartTime}
-                  onChange={(e) => setReschedStartTime(e.target.value)}
-                  className="h-11 rounded-xl font-mono text-sm"
-                  required
-                />
+            {/* New Start and End Times with Selects & Duration Presets */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-3 min-w-0">
+                <div className="space-y-1.5 min-w-0">
+                  <Label className="text-xs font-semibold">New Start Time</Label>
+                  <Select
+                    value={reschedStartTime}
+                    onValueChange={(v) => {
+                      setReschedStartTime(v)
+                      if (v >= reschedEndTime) {
+                        setReschedEndTime(addHours(v, 2))
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-11 rounded-xl min-w-0 w-full font-mono text-xs">
+                      <SelectValue placeholder="Start time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {TIME_SLOTS.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5 min-w-0">
+                  <Label className="text-xs font-semibold">New End Time</Label>
+                  <Select value={reschedEndTime} onValueChange={setReschedEndTime}>
+                    <SelectTrigger className="h-11 rounded-xl min-w-0 w-full font-mono text-xs">
+                      <SelectValue placeholder="End time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {TIME_SLOTS.map((t) => (
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">New End Time</Label>
-                <Input
-                  type="time"
-                  value={reschedEndTime}
-                  onChange={(e) => setReschedEndTime(e.target.value)}
-                  className="h-11 rounded-xl font-mono text-sm"
-                  required
-                />
+
+              {/* Quick Duration Chips */}
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <span className="text-[11px] text-muted-foreground font-medium shrink-0">Duration:</span>
+                {[
+                  { label: '1 hr', hrs: 1 },
+                  { label: '1.5 hrs', hrs: 1.5 },
+                  { label: '2 hrs', hrs: 2 },
+                  { label: '3 hrs', hrs: 3 },
+                ].map((d) => (
+                  <button
+                    key={d.label}
+                    type="button"
+                    onClick={() => setReschedEndTime(addHours(reschedStartTime, d.hrs))}
+                    className="text-[11px] rounded-lg border border-border bg-muted/40 px-2 py-0.5 font-medium text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all"
+                  >
+                    {d.label}
+                  </button>
+                ))}
               </div>
             </div>
 

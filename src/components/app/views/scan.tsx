@@ -6,11 +6,12 @@
 // Face check-ins — walkthrough or kiosk, single-capture verification.
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
+  AlertCircle,
   CameraOff,
   Check,
   Clock,
@@ -33,12 +34,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { IdentityAvatar } from '@/components/app/shared'
 
@@ -78,13 +79,13 @@ import {
 // ---------- Tunables ----------------------------------------
 
 const DETECT_INTERVAL_MS = 166 // ~6 fps
-// Thresholds: face-api same-person distances sit ~0.30–0.45, different
-// people ~0.52+. Kiosk (one-at-a-time, higher-res detection) runs tighter
-// than walkthrough to block impostors; both use an ambiguity margin so a
+// Thresholds: face-api same-person distances sit ~0.30–0.48, different
+// people ~0.55+. Kiosk (one-at-a-time, higher-res detection) runs slightly tighter
+// than walkthrough to prevent impostors; both use an ambiguity margin so a
 // face that sits between two students never picks the wrong one.
-const WALKTHROUGH_THRESHOLD = 0.48
-const KIOSK_THRESHOLD = 0.42
-const MATCH_MARGIN = 0.04
+const WALKTHROUGH_THRESHOLD = 0.52
+const KIOSK_THRESHOLD = 0.48
+const MATCH_MARGIN = 0.03
 const CONSECUTIVE_FRAMES = 2
 const SYNC_DEBOUNCE_MS = 15000
 const RECENT_MAX = 24
@@ -580,6 +581,11 @@ function LiveScreen({
   const [manualOpen, setManualOpen] = useState(false)
   const [manualQuery, setManualQuery] = useState('')
 
+  const enrolledCount = useMemo(
+    () => roster.filter((r) => r.descriptors && r.descriptors.length > 0).length,
+    [roster]
+  )
+
   // ---- refs used inside the detection loop ----
   const checkedRef = useRef<Set<string>>(new Set(initialChecked))
   const rosterByIdRef = useRef<Map<string, RosterEntry>>(new Map())
@@ -823,14 +829,23 @@ function LiveScreen({
         seen.add(m.id)
         const hits = (hitsRef.current.get(m.id) ?? 0) + 1
         hitsRef.current.set(m.id, hits)
-        if (hits >= CONSECUTIVE_FRAMES) {
+        // Check in immediately if high-confidence match (< 0.46) or after consecutive frames
+        if (hits >= CONSECUTIVE_FRAMES || m.distance < 0.46) {
           hitsRef.current.delete(m.id)
           const entry = rosterByIdRef.current.get(m.id)
           if (entry) fnRef.current.checkIn(entry, m.distance)
         }
       })
+      // Gracefully decay hits instead of instant wipeout on a single dropped frame
       for (const key of [...hitsRef.current.keys()]) {
-        if (!seen.has(key)) hitsRef.current.delete(key)
+        if (!seen.has(key)) {
+          const prev = hitsRef.current.get(key) ?? 0
+          if (prev <= 1) {
+            hitsRef.current.delete(key)
+          } else {
+            hitsRef.current.set(key, prev - 1)
+          }
+        }
       }
     }
 
@@ -891,9 +906,15 @@ function LiveScreen({
       if (busyRef.current) return
       const video = videoRef.current
       if (!video || video.readyState < 2) return
+      if (video.paused && !video.ended) {
+        void video.play().catch(() => {})
+      }
       busyRef.current = true
       const step = session.mode === 'KIOSK' ? kioskStep() : walkthroughStep()
-      void step
+      const watchdog = new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('detection timeout')), 2500)
+      )
+      void Promise.race([step, watchdog])
         .catch(() => {})
         .finally(() => {
           busyRef.current = false
@@ -1059,6 +1080,18 @@ function LiveScreen({
           </div>
         )}
 
+        {cameraState === 'ready' && roster.length > 0 && enrolledCount === 0 && (
+          <div className="absolute top-3 inset-x-4 z-20 rounded-xl border border-amber-500/40 bg-amber-950/85 p-3 text-amber-200 backdrop-blur-md shadow-lg text-xs flex items-center gap-2.5">
+            <AlertCircle className="h-5 w-5 shrink-0 text-amber-400" />
+            <div className="flex-1">
+              <p className="font-semibold">No student faces enrolled yet</p>
+              <p className="text-[11px] opacity-90">
+                None of the {roster.length} students have face photos saved. Use &quot;Add manually&quot; below or enroll students from Course settings.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* kiosk giant state machine */}
         {session.mode === 'KIOSK' && cameraState === 'ready' && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pb-8 pt-16 text-center">
@@ -1169,23 +1202,26 @@ function LiveScreen({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* manual check-in sheet */}
-      <Sheet open={manualOpen} onOpenChange={setManualOpen}>
-        <SheetContent side="bottom" className="flex max-h-[85dvh] flex-col gap-0 rounded-t-3xl p-0">
-          <SheetHeader className="shrink-0 border-b px-4 pb-3 pt-5 text-left">
-            <SheetTitle>Add student manually</SheetTitle>
-            <SheetDescription>
+      {/* manual check-in dialog — positioned at the top on mobile so the virtual keyboard NEVER covers it */}
+      <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+        <DialogContent className="max-w-md w-[calc(100vw-24px)] sm:w-full rounded-2xl p-0 flex flex-col gap-0 overflow-hidden top-6 translate-y-0 sm:top-1/2 sm:-translate-y-1/2 max-h-[85vh] sm:max-h-[80vh] shadow-2xl bg-card border border-border">
+          <DialogHeader className="shrink-0 border-b px-4 py-3.5 text-left">
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-primary" />
+              Add student manually
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
               For students who opted out of face scans or whose face didn&apos;t match.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="shrink-0 px-4 pt-3">
+            </DialogDescription>
+          </DialogHeader>
+          <div className="shrink-0 px-4 pt-3 pb-2 bg-muted/20 border-b">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={manualQuery}
                 onChange={(e) => setManualQuery(e.target.value)}
                 placeholder="Search name or student ID…"
-                className="h-11 rounded-xl bg-card pl-9"
+                className="h-11 rounded-xl bg-background pl-9 text-sm"
                 inputMode="search"
               />
             </div>
@@ -1194,7 +1230,7 @@ function LiveScreen({
               to mark present
             </p>
           </div>
-          <div className="mt-2 min-h-0 flex-1 overflow-y-auto scrollbar-thin px-4 pb-2">
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-4 py-2 max-h-[40vh] sm:max-h-[50vh]">
             {manualCandidates.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
                 {checkedIds.size === roster.length
@@ -1202,13 +1238,13 @@ function LiveScreen({
                   : `No students match “${manualQuery}”.`}
               </div>
             ) : (
-              <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+              <div className="divide-y overflow-hidden rounded-2xl border bg-background">
                 {manualCandidates.map((r) => (
                   <button
                     key={r.id}
                     type="button"
                     onClick={() => manualCheckIn(r)}
-                    className="flex min-h-11 w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/60 active:bg-accent"
+                    className="flex min-h-12 w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/60 active:bg-accent"
                   >
                     <IdentityAvatar name={nameOf(r)} className="h-9 w-9" />
                     <span className="min-w-0 flex-1 leading-tight">
@@ -1217,22 +1253,22 @@ function LiveScreen({
                         {r.studentId}
                       </span>
                     </span>
-                    <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-1 text-[11px] font-bold text-primary shrink-0">
+                      <UserPlus className="h-3.5 w-3.5" />
+                      Mark
+                    </span>
                   </button>
                 ))}
               </div>
             )}
           </div>
-          <div
-            className="shrink-0 border-t bg-background px-4"
-            style={{ paddingTop: 12, paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
-          >
-            <Button variant="outline" className="h-11 w-full" onClick={() => setManualOpen(false)}>
+          <div className="shrink-0 border-t bg-muted/10 p-3">
+            <Button variant="outline" className="h-11 w-full rounded-xl font-semibold" onClick={() => setManualOpen(false)}>
               Done
             </Button>
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
     </div>
   )

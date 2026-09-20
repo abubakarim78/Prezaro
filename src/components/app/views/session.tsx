@@ -599,7 +599,6 @@ export default function SessionView() {
               onChange={(e) => setLateQuery(e.target.value)}
               placeholder="Search by student name or index number…"
               className="h-11 rounded-xl pl-9"
-              autoFocus
             />
           </div>
 
