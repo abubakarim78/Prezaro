@@ -32,6 +32,7 @@ model User {
   department   Department? @relation(fields: [departmentId], references: [id])
   taughtCourses Course[]   @relation("CourseLecturer")
   sessions     Session[]   @relation("SessionLecturer")
+  schedules    ClassSchedule[]
   createdAt    DateTime    @default(now())
 }
 
@@ -48,6 +49,7 @@ model Course {
   lecturer     User         @relation("CourseLecturer", fields: [lecturerId], references: [id])
   enrollments  Enrollment[]
   sessions     Session[]
+  schedules    ClassSchedule[]
   createdAt    DateTime     @default(now())
 
   @@unique([code, departmentId])
@@ -125,4 +127,25 @@ model EmailLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model ClassSchedule {
+  id                  String   @id @default(cuid())
+  courseId            String
+  course              Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lecturerId          String
+  lecturer            User     @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  dayOfWeek           Int      // 1 = Monday, 2 = Tuesday, ..., 7 = Sunday
+  startTime           String   // "08:00" (24h HH:mm)
+  endTime             String   // "10:00" (24h HH:mm)
+  venue               String?  // e.g. "Lecture Theatre 1", "Room 402"
+  recurrence          String   @default("WEEKLY") // WEEKLY | BIWEEKLY | ONCE
+  reminderLeadMinutes Int      @default(30) // 15 | 30 | 60
+  notifyEmail         Boolean  @default(true)
+  notifyPush          Boolean  @default(true)
+  lastNotifiedDate    String?  // YYYY-MM-DD for deduplication
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([lecturerId, dayOfWeek])
 }

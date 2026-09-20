@@ -43,6 +43,7 @@ export {
 import { getUserSettings } from '@/lib/settings'
 import type {
   AttendanceRecord as AttendanceRecordDTO,
+  ClassSchedule,
   Course as CourseDTO,
   SessionDetail,
   SessionMode,
@@ -246,6 +247,28 @@ export function sessionScopeWhere(user: AuthUser): Prisma.SessionWhereInput {
   return user.role === 'ADMIN'
     ? { course: { departmentId: user.departmentId ?? '__none__' } }
     : { lecturerId: user.id }
+}
+
+export function serializeSchedule(s: any): ClassSchedule {
+  return {
+    id: s.id,
+    courseId: s.courseId,
+    courseCode: s.course?.code ?? '',
+    courseTitle: s.course?.title ?? '',
+    lecturerId: s.lecturerId,
+    dayOfWeek: s.dayOfWeek,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    venue: s.venue,
+    recurrence: s.recurrence,
+    reminderLeadMinutes: s.reminderLeadMinutes,
+    notifyEmail: s.notifyEmail,
+    notifyPush: s.notifyPush,
+    lastNotifiedDate: s.lastNotifiedDate,
+    studentCount: s.course?._count?.enrollments ?? 0,
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+  }
 }
 
 /** WHERE clause limiting students to the user's department. */

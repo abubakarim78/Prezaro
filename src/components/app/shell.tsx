@@ -12,6 +12,7 @@ import {
   History,
   MoreHorizontal,
   BarChart3,
+  CalendarDays,
   ShieldCheck,
   Settings,
   WifiOff,
@@ -38,6 +39,7 @@ import { toast } from 'sonner'
 
 const NAV: { view: ViewName; label: string; icon: typeof Home }[] = [
   { view: 'home', label: 'Home', icon: Home },
+  { view: 'schedule', label: 'Timetable', icon: CalendarDays },
   { view: 'students', label: 'Students', icon: Users },
   { view: 'sessions', label: 'Sessions', icon: History },
   { view: 'reports', label: 'Reports', icon: BarChart3 },
@@ -230,6 +232,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             )}
             <button
+              onClick={() => navigate('schedule')}
+              className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
+              aria-label="Class Timetable"
+            >
+              <CalendarDays className="h-[18px] w-[18px]" />
+            </button>
+            <button
               onClick={() => navigate('settings')}
               className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
               aria-label="Settings"
@@ -284,6 +293,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SheetTitle>
               </SheetHeader>
               <div className="px-4 pb-6 space-y-1.5">
+                <MoreItem icon={CalendarDays} label="Class Timetable" onClick={() => navTo('schedule')} />
                 {user.role === 'ADMIN' && (
                   <MoreItem icon={ShieldCheck} label="Department dashboard" onClick={() => navTo('admin')} />
                 )}

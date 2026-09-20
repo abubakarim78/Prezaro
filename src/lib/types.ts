@@ -202,6 +202,48 @@ export interface SettingsResponse {
   settings: AppSettings
 }
 
+// ---- Class Schedules & Reminders ---------------------------
+
+export interface ClassSchedule {
+  id: string
+  courseId: string
+  courseCode: string
+  courseTitle: string
+  lecturerId: string
+  dayOfWeek: number // 1 = Mon ... 7 = Sun
+  startTime: string // "08:00" (HH:mm)
+  endTime: string // "10:00" (HH:mm)
+  venue?: string | null
+  recurrence: string // WEEKLY | BIWEEKLY | ONCE
+  reminderLeadMinutes: number // 15 | 30 | 60
+  notifyEmail: boolean
+  notifyPush: boolean
+  lastNotifiedDate?: string | null
+  studentCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ClassScheduleInput {
+  courseId: string
+  dayOfWeek: number
+  startTime: string
+  endTime: string
+  venue?: string
+  recurrence?: string
+  reminderLeadMinutes?: number
+  notifyEmail?: boolean
+  notifyPush?: boolean
+}
+
+export interface SchedulesResponse {
+  schedules: ClassSchedule[]
+}
+
+export interface ScheduleResponse {
+  schedule: ClassSchedule
+}
+
 // ---- Email notifications -------------------------------------
 
 export type EmailLogStatus = 'SENT' | 'SIMULATED' | 'FAILED'
@@ -211,6 +253,8 @@ export type EmailLogType =
   | 'ACCOUNT_ALERT'
   | 'STUDENT_REGISTERED'
   | 'COURSE_ENROLLMENT'
+  | 'CLASS_REMINDER'
+  | 'CLASS_RESCHEDULED'
   | 'TEST'
 
 export interface EmailLogItem {

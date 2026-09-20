@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import {
   CameraOff,
   Check,
+  Clock,
   LogOut,
   RefreshCw,
   ScanFace,
@@ -116,6 +117,8 @@ const confidenceOf = (distance: number) =>
 export default function ScanView() {
   const navigate = useAppStore((s) => s.navigate)
   const online = useAppStore((s) => s.online)
+  const params = useAppStore((s) => s.params)
+  const isLateMode = params.lateMode === '1'
 
   const [phase, setPhase] = useState<'select' | 'loading' | 'live'>('select')
   const [courses, setCourses] = useState<Course[] | null>(null)
@@ -142,7 +145,16 @@ export default function ScanView() {
     let alive = true
     api<{ courses: Course[] }>('/api/courses')
       .then((d) => {
-        if (alive) setCourses(d.courses)
+        if (alive) {
+          setCourses(d.courses)
+          // If a course was specified in params (e.g. from reminder or timetable), auto-select it
+          if (params.courseId) {
+            setSelectedId(params.courseId)
+          } else if (params.courseCode) {
+            const found = d.courses.find((c) => c.code.toLowerCase() === params.courseCode.toLowerCase())
+            if (found) setSelectedId(found.id)
+          }
+        }
       })
       .catch((e) => {
         if (alive) setCoursesError(getErrorMessage(e))
@@ -158,7 +170,7 @@ export default function ScanView() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [params.courseId, params.courseCode])
 
   // ---- roster count on course select ----
   const selectCourse = useCallback(
@@ -194,6 +206,15 @@ export default function ScanView() {
   const ensureSession = useCallback(
     async (course: Course, sessionMode: SessionMode): Promise<SessionDetail> => {
       const store = useAppStore.getState()
+      if (params.sessionId) {
+        try {
+          const detail = await api<{ session: SessionDetail }>(`/api/sessions/${params.sessionId}`)
+          return detail.session
+        } catch {
+          // fallback to normal ensure
+        }
+      }
+
       if (!store.online) {
         const open = store.openSession
         if (open && open.courseId === course.id) {
@@ -355,6 +376,7 @@ export default function ScanView() {
         initialChecked={live.checkedEntryIds}
         initialRecent={live.recent}
         engine={engineRef.current}
+        isLateMode={isLateMode}
       />
     )
   }
@@ -520,6 +542,7 @@ interface LiveScreenProps {
   initialChecked: string[]
   initialRecent: RecentChip[]
   engine: FaceApi | null
+  isLateMode?: boolean
 }
 
 function LiveScreen({
@@ -528,6 +551,7 @@ function LiveScreen({
   initialChecked,
   initialRecent,
   engine: initialEngine,
+  isLateMode = false,
 }: LiveScreenProps) {
   const navigate = useAppStore((s) => s.navigate)
   const replace = useAppStore((s) => s.replace)
@@ -703,7 +727,7 @@ function LiveScreen({
         sessionId: session.id,
         studentId: entry.id, // DB id — matches sync API + review merge
         name: nameOf(entry),
-        status: 'PRESENT',
+        status: isLateMode ? 'LATE' : 'PRESENT',
         confidence: distance != null ? confidenceOf(distance) : null,
         markedAt: new Date().toISOString(),
       }
@@ -728,18 +752,18 @@ function LiveScreen({
       navigator.vibrate?.(60)
       return true
     },
-    [session.id, scheduleSync, glow]
+    [session.id, scheduleSync, glow, isLateMode]
   )
 
   const manualCheckIn = useCallback(
     (entry: RosterEntry) => {
       if (checkIn(entry)) {
-        toast.success(`${nameOf(entry)} marked present`)
+        toast.success(`${nameOf(entry)} marked ${isLateMode ? 'late' : 'present'}`)
       } else {
         toast.info(`${nameOf(entry)} was already checked in`)
       }
     },
-    [checkIn]
+    [checkIn, isLateMode]
   )
 
   const fnRef = useRef({ checkIn, flushSync })
@@ -958,6 +982,11 @@ function LiveScreen({
           <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold tracking-wide">
             {session.courseCode}
           </span>
+          {isLateMode && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/30 border border-amber-500/50 px-2.5 py-1 text-xs font-bold text-amber-300">
+              <Clock className="h-3.5 w-3.5" /> Late Mode
+            </span>
+          )}
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${
               checkedIds.size > 0 ? 'bg-emerald-500 text-emerald-950' : 'bg-white/10 text-white/80'

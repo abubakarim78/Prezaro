@@ -6,7 +6,10 @@ import { format, isToday, isYesterday } from 'date-fns'
 import {
   BarChart3,
   BookPlus,
+  CalendarClock,
+  CalendarDays,
   ChevronRight,
+  Clock,
   Download,
   Play,
   ScanFace,
@@ -21,6 +24,7 @@ import { useAppStore } from '@/lib/store'
 import type {
   CoursesResponse,
   DepartmentReport,
+  SchedulesResponse,
   SessionsResponse,
 } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -45,6 +49,7 @@ export default function HomeView() {
   const coursesBlock = useApiBlock<CoursesResponse>('/api/courses')
   const reportBlock = useApiBlock<{ report: DepartmentReport }>('/api/reports/department')
   const sessionsBlock = useApiBlock<SessionsResponse>('/api/sessions?limit=5')
+  const schedulesBlock = useApiBlock<SchedulesResponse>('/api/schedules')
 
   // ---- install prompt ----
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
@@ -100,6 +105,31 @@ export default function HomeView() {
   }, [reportBlock.data])
 
   const sessions = sessionsBlock.data?.sessions ?? []
+
+  const upcomingToday = useMemo(() => {
+    const list = schedulesBlock.data?.schedules ?? []
+    const now = new Date()
+    const jsDay = now.getDay()
+    const todayDay = jsDay === 0 ? 7 : jsDay
+    const curMins = now.getHours() * 60 + now.getMinutes()
+
+    const todays = list.filter((s) => s.dayOfWeek === todayDay)
+    if (todays.length === 0) return null
+
+    for (const s of todays) {
+      const [sh, sm] = s.startTime.split(':').map(Number)
+      const [eh, em] = s.endTime.split(':').map(Number)
+      const startMins = sh * 60 + sm
+      const endMins = eh * 60 + em
+      if (curMins >= startMins && curMins < endMins) {
+        return { schedule: s, status: 'ongoing' as const, minutesLeft: 0 }
+      }
+      if (curMins < startMins) {
+        return { schedule: s, status: 'upcoming' as const, minutesLeft: startMins - curMins }
+      }
+    }
+    return null
+  }, [schedulesBlock.data])
 
   const firstName = user?.name?.trim().split(/\s+/)[0] ?? 'there'
   const lastName = user?.name?.trim().split(/\s+/).slice(-1)[0] ?? ''
@@ -165,6 +195,89 @@ export default function HomeView() {
             </motion.div>
           )}
 
+          {/* ---------- Upcoming / Ongoing Class Widget ---------- */}
+          {upcomingToday && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className={cn(
+                'flex items-center gap-3 rounded-2xl border p-4 shadow-sm',
+                upcomingToday.status === 'ongoing'
+                  ? 'border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-card'
+                  : 'border-primary/30 bg-gradient-to-r from-primary/15 via-primary/5 to-card'
+              )}
+            >
+              <div
+                className={cn(
+                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
+                  upcomingToday.status === 'ongoing'
+                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-primary/20 text-primary'
+                )}
+              >
+                <CalendarDays className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1 leading-tight">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-primary">
+                    {upcomingToday.schedule.courseCode}
+                  </span>
+                  {upcomingToday.status === 'ongoing' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Class in progress
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-muted-foreground">
+                      Starts in {upcomingToday.minutesLeft} mins
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-sm font-semibold mt-0.5">
+                  {upcomingToday.schedule.courseTitle}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {upcomingToday.schedule.startTime} – {upcomingToday.schedule.endTime}
+                  {upcomingToday.schedule.venue ? ` · ${upcomingToday.schedule.venue}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-10 font-semibold text-xs gap-1.5 bg-background/80 hover:bg-background border-border/80"
+                  onClick={() =>
+                    navigate('schedule', {
+                      rescheduleId: upcomingToday.schedule.id,
+                    })
+                  }
+                >
+                  <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                  Reschedule
+                </Button>
+                <Button
+                  size="sm"
+                  className={cn(
+                    'min-h-10 font-bold text-xs gap-1.5',
+                    upcomingToday.status === 'ongoing'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : ''
+                  )}
+                  onClick={() =>
+                    navigate('scan', {
+                      courseId: upcomingToday.schedule.courseId,
+                      courseCode: upcomingToday.schedule.courseCode,
+                    })
+                  }
+                >
+                  <ScanFace className="h-4 w-4" />
+                  Take attendance
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
           {/* ---------- Hero: take attendance ---------- */}
           <motion.button
             initial={{ opacity: 0, y: 8 }}
@@ -225,8 +338,9 @@ export default function HomeView() {
           </div>
 
           {/* ---------- Quick actions ---------- */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             <QuickAction icon={UserPlus} label="Add student" onClick={() => navigate('students')} />
+            <QuickAction icon={CalendarDays} label="Timetable" onClick={() => navigate('schedule')} />
             <QuickAction icon={BookPlus} label="New course" onClick={() => navigate('courses')} />
             <QuickAction icon={BarChart3} label="Reports" onClick={() => navigate('reports')} />
           </div>

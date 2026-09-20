@@ -22,6 +22,7 @@ export type ViewName =
   | 'reports'
   | 'admin'
   | 'settings'
+  | 'schedule'
 
 interface OpenSessionRef {
   id: string

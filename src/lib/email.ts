@@ -19,6 +19,8 @@ export type EmailType =
   | 'ACCOUNT_ALERT'
   | 'STUDENT_REGISTERED'
   | 'COURSE_ENROLLMENT'
+  | 'CLASS_REMINDER'
+  | 'CLASS_RESCHEDULED'
   | 'TEST'
 
 export interface EmailConfigStatus {
@@ -268,6 +270,58 @@ export function courseEnrollmentHtml(
     row(`Hi ${escapeHtml(name)} — you have been enrolled in a new course on ${BRAND.name}:`) +
       highlight(`<strong>${escapeHtml(courseCode)} — ${escapeHtml(courseTitle)}</strong><br/>Lecturer: ${escapeHtml(lecturerName)}<br/>Your index number: ${escapeHtml(studentIndex)}`) +
       row('Your attendance for this course will be recorded automatically during lectures once your face is enrolled, or manually by your lecturer.'),
+  )
+}
+
+export function classReminderHtml(
+  lecturerName: string,
+  courseCode: string,
+  courseTitle: string,
+  timeRange: string,
+  venue: string | null,
+  leadMinutes: number,
+  appUrl: string,
+): string {
+  const scanLink = `${appUrl.replace(/\/+$/, '')}?action=scan&courseCode=${encodeURIComponent(courseCode)}`
+  return layout(
+    `Upcoming class: ${escapeHtml(courseCode)} in ${leadMinutes} minutes`,
+    row(`Hi ${escapeHtml(lecturerName)} — your class is scheduled to begin shortly.`) +
+      highlight(`
+        <div style="font-size:16px;font-weight:700;color:${BRAND.text};margin-bottom:6px;">${escapeHtml(courseCode)} — ${escapeHtml(courseTitle)}</div>
+        <div style="margin-bottom:4px;">&#9200; <strong>Time:</strong> ${escapeHtml(timeRange)}</div>
+        ${venue ? `<div style="margin-bottom:4px;">&#128205; <strong>Venue:</strong> ${escapeHtml(venue)}</div>` : ''}
+      `) +
+      row(`
+        <div style="text-align:center;padding:12px 0;">
+          <a href="${scanLink}" style="display:inline-block;background:#0d9488;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 28px;border-radius:10px;">Take Attendance Now &rarr;</a>
+        </div>
+      `) +
+      row('You can launch the face scanner directly from your phone or laptop using the button above.'),
+    'Prezaro automatic class reminder.',
+  )
+}
+
+export function classRescheduledHtml(
+  lecturerName: string,
+  courseCode: string,
+  courseTitle: string,
+  oldTime: string,
+  newTime: string,
+  venue: string | null,
+  reason: string | null,
+): string {
+  return layout(
+    `Class Rescheduled: ${escapeHtml(courseCode)}`,
+    row(`Hello — your lecture schedule for <strong>${escapeHtml(courseCode)} (${escapeHtml(courseTitle)})</strong> has been updated by ${escapeHtml(lecturerName)}.`) +
+      highlight(`
+        <div style="font-size:15px;font-weight:700;color:${BRAND.text};margin-bottom:6px;">${escapeHtml(courseCode)} — ${escapeHtml(courseTitle)}</div>
+        <div style="margin-bottom:4px;color:#991b1b;"><strike>&#128197; <strong>Previous:</strong> ${escapeHtml(oldTime)}</strike></div>
+        <div style="margin-bottom:4px;color:#065f46;font-weight:600;">&#9989; <strong>New Time:</strong> ${escapeHtml(newTime)}</div>
+        ${venue ? `<div style="margin-bottom:4px;">&#128205; <strong>Venue:</strong> ${escapeHtml(venue)}</div>` : ''}
+        ${reason ? `<div style="margin-top:8px;padding-top:6px;border-top:1px solid ${BRAND.border};font-size:13px;color:${BRAND.muted};">&#128221; <em>Note: ${escapeHtml(reason)}</em></div>` : ''}
+      `) +
+      row('Please take note of the updated schedule. Your attendance will be marked at the new time.'),
+    'Prezaro timetable notification.',
   )
 }
 

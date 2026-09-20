@@ -25,6 +25,7 @@ import SessionView from '@/components/app/views/session'
 import ReportsView from '@/components/app/views/reports'
 import AdminView from '@/components/app/views/admin'
 import SettingsView from '@/components/app/views/settings'
+import ScheduleView from '@/components/app/views/schedule'
 import { AppShell } from '@/components/app/shell'
 
 /** Views rendered full-screen without the nav shell */
@@ -143,6 +144,50 @@ function PrezaroInner() {
     }
   }, [setBooted, setUser, setOnline, setPendingSync, replace, setOpenSession])
 
+  // ---- Background check for upcoming class notifications ----
+  useEffect(() => {
+    if (!user) return
+    let active = true
+
+    const runCheck = async () => {
+      try {
+        const { schedules } = await api<{ schedules: import('@/lib/types').ClassSchedule[] }>('/api/schedules')
+        if (!active) return
+        const { checkUpcomingClass, showLocalNotification } = await import('@/lib/notifications')
+        const hit = checkUpcomingClass(schedules)
+        if (hit) {
+          const { schedule: s, minutesLeft, isOngoing } = hit
+          const title = isOngoing
+            ? `Class happening now: ${s.courseCode}`
+            : `Class in ${minutesLeft}m: ${s.courseCode}`
+          const body = `${s.courseTitle}${s.venue ? ` at ${s.venue}` : ''}. Tap to take attendance.`
+
+          void showLocalNotification(title, { body })
+
+          toast(title, {
+            description: body,
+            duration: 15000,
+            action: {
+              label: 'Take Attendance',
+              onClick: () => {
+                useAppStore.getState().navigate('scan', { courseId: s.courseId, courseCode: s.courseCode })
+              },
+            },
+          })
+        }
+      } catch {
+        // quiet background check
+      }
+    }
+
+    void runCheck()
+    const timer = setInterval(() => void runCheck(), 60_000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [user])
+
   if (!booted) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-background">
@@ -182,6 +227,12 @@ function PrezaroInner() {
       return (
         <AppShell>
           <CoursesView />
+        </AppShell>
+      )
+    case 'schedule':
+      return (
+        <AppShell>
+          <ScheduleView />
         </AppShell>
       )
     case 'sessions':
