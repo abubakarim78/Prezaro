@@ -21,7 +21,7 @@ const updateScheduleSchema = z.object({
   endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   venue: z.string().max(100).optional().nullable(),
   recurrence: z.enum(['WEEKLY', 'BIWEEKLY', 'ONCE']).optional(),
-  reminderLeadMinutes: z.number().int().min(0).max(120).optional(),
+  reminderLeadMinutes: z.number().int().min(0).max(1440).optional(),
   notifyEmail: z.boolean().optional(),
   notifyPush: z.boolean().optional(),
   notifyStudents: z.boolean().optional(),

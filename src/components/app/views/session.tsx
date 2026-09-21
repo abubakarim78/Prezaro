@@ -57,6 +57,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -579,30 +587,36 @@ export default function SessionView() {
         </div>
       </motion.div>
 
-      {/* ---------- Latecomers Quick Add Sheet ---------- */}
-      <Sheet open={lateDrawerOpen} onOpenChange={setLateDrawerOpen}>
-        <SheetContent side="bottom" className="max-h-[85vh] rounded-t-3xl pb-safe flex flex-col">
-          <SheetHeader className="text-left pb-2">
-            <SheetTitle className="flex items-center gap-2 text-lg">
-              <UserPlus className="h-5 w-5 text-primary" />
+      {/* ---------- Latecomers Quick Add Dialog (positioned at top on mobile so keyboard never hides it) ---------- */}
+      <Dialog open={lateDrawerOpen} onOpenChange={setLateDrawerOpen}>
+        <DialogContent className="max-w-md w-[calc(100vw-24px)] sm:w-full rounded-2xl p-0 flex flex-col gap-0 overflow-hidden top-4 translate-y-0 sm:top-1/2 sm:-translate-y-1/2 max-h-[85dvh] sm:max-h-[80vh] shadow-2xl bg-card border border-border">
+          <DialogHeader className="shrink-0 border-b px-4 py-3.5 text-left">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <UserPlus className="h-4 w-4 text-primary" />
               Add Latecomers to Session
-            </SheetTitle>
-            <SheetDescription>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
               Mark absent students who arrived late to this class without creating a new session.
-            </SheetDescription>
-          </SheetHeader>
+            </DialogDescription>
+          </DialogHeader>
 
-          <div className="relative my-2">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={lateQuery}
-              onChange={(e) => setLateQuery(e.target.value)}
-              placeholder="Search by student name or index number…"
-              className="h-11 rounded-xl pl-9"
-            />
+          <div className="shrink-0 px-4 pt-3 pb-2 bg-muted/20 border-b">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={lateQuery}
+                onChange={(e) => setLateQuery(e.target.value)}
+                placeholder="Search by student name or index number…"
+                className="h-11 rounded-xl bg-background pl-9 text-sm"
+                inputMode="search"
+              />
+            </div>
+            <p className="mt-1.5 px-1 text-[11px] text-muted-foreground">
+              {absentStudents.length} currently unmarked · tap to mark present or late
+            </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y border rounded-xl max-h-[50vh] scrollbar-thin">
+          <div className="min-h-0 flex-1 overflow-y-auto divide-y px-2 max-h-[35dvh] sm:max-h-[45vh] scrollbar-thin">
             {loadingRoster ? (
               <div className="py-12 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -618,8 +632,8 @@ export default function SessionView() {
               </div>
             ) : (
               absentStudents.map((st) => (
-                <div key={st.id} className="flex items-center justify-between p-3 gap-3">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div key={st.id} className="flex items-center justify-between p-2.5 gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <IdentityAvatar name={`${st.firstName} ${st.lastName}`} />
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">
@@ -632,7 +646,7 @@ export default function SessionView() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-9 px-3 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 font-semibold text-xs"
+                      className="h-8 px-2.5 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 font-semibold text-xs rounded-lg"
                       disabled={markingId === st.id}
                       onClick={() => handleMarkStudent(st.id, 'LATE')}
                     >
@@ -641,12 +655,12 @@ export default function SessionView() {
                       ) : (
                         <Clock className="h-3.5 w-3.5 mr-1" />
                       )}
-                      Mark Late
+                      Late
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-9 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                      className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground rounded-lg"
                       disabled={markingId === st.id}
                       onClick={() => handleMarkStudent(st.id, 'PRESENT')}
                     >
@@ -658,20 +672,27 @@ export default function SessionView() {
             )}
           </div>
 
-          <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
-            <span>{absentStudents.length} currently unmarked</span>
+          <DialogFooter className="p-3 bg-muted/10 border-t flex flex-row items-center justify-between sm:justify-between gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={() => handleResumeScan(true)}
-              className="h-8 gap-1.5 text-xs"
+              className="h-9 gap-1.5 text-xs rounded-xl"
             >
               <ScanFace className="h-3.5 w-3.5" />
-              Scan with camera instead
+              Scan with camera
             </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setLateDrawerOpen(false)}
+              className="h-9 px-4 text-xs rounded-xl font-medium"
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

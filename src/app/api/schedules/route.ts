@@ -18,7 +18,7 @@ const createScheduleSchema = z.object({
   endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid end time (HH:mm)'),
   venue: z.string().max(100).optional().nullable(),
   recurrence: z.enum(['WEEKLY', 'BIWEEKLY', 'ONCE']).default('WEEKLY'),
-  reminderLeadMinutes: z.number().int().min(0).max(120).default(30),
+  reminderLeadMinutes: z.number().int().min(0).max(1440).default(30),
   notifyEmail: z.boolean().default(true),
   notifyPush: z.boolean().default(true),
 })
