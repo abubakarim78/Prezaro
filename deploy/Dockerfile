@@ -3,9 +3,12 @@
 
 FROM oven/bun:1
 
-# Install OpenSSL for Prisma client engine runtime support and create node symlink
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/* \
-    && ln -sf $(which bun) /usr/local/bin/node
+# Install OpenSSL for Prisma client engine runtime support
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Copy official Node.js 20 binary so Next.js build has native Node runtime
+COPY --from=node:20-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+RUN ln -sf /usr/local/bin/node /usr/bin/node
 
 WORKDIR /app
 
