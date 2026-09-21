@@ -3,8 +3,9 @@
 
 FROM oven/bun:1
 
-# Install OpenSSL for Prisma client engine runtime support
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL for Prisma client engine runtime support and create node symlink
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/* \
+    && ln -sf $(which bun) /usr/local/bin/node
 
 WORKDIR /app
 
