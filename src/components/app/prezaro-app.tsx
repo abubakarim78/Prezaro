@@ -9,6 +9,8 @@ import { clearCachedUser, readCachedUser, writeCachedUser } from '@/lib/session-
 import { toast } from 'sonner'
 import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
+import { BrandIcon } from '@/components/brand/brand-logo'
+import { InstallPwaPrompt } from '@/components/brand/install-pwa-prompt'
 import { watchForUpdates } from '@/lib/pwa'
 
 import LoginView from '@/components/app/views/login'
@@ -191,81 +193,88 @@ function PrezaroInner() {
   if (!booted) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-background">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-          <FaceScanMark className="h-8 w-8" />
-        </div>
+        <BrandIcon className="h-16 w-16 shadow-lg shadow-primary/25 animate-pulse" />
         <p className="text-sm text-muted-foreground font-medium">Prezaro</p>
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/60" />
       </div>
     )
   }
 
-  if (IMMERSIVE_VIEWS.has(view) || !user) {
+  const renderView = () => {
+    if (IMMERSIVE_VIEWS.has(view) || !user) {
+      switch (view) {
+        case 'onboarding':
+          return <OnboardingView />
+        case 'scan':
+          return <ScanView />
+        case 'enroll':
+          return <EnrollView />
+        case 'review':
+          return <ReviewView />
+        default:
+          return <LoginView />
+      }
+    }
+
     switch (view) {
-      case 'onboarding':
-        return <OnboardingView />
-      case 'scan':
-        return <ScanView />
-      case 'enroll':
-        return <EnrollView />
-      case 'review':
-        return <ReviewView />
+      case 'students':
+      case 'student':
+        return (
+          <AppShell>
+            {view === 'students' ? <StudentsView /> : <StudentView />}
+          </AppShell>
+        )
+      case 'courses':
+        return (
+          <AppShell>
+            <CoursesView />
+          </AppShell>
+        )
+      case 'schedule':
+        return (
+          <AppShell>
+            <ScheduleView />
+          </AppShell>
+        )
+      case 'sessions':
+      case 'session':
+        return (
+          <AppShell>
+            {view === 'sessions' ? <SessionsView /> : <SessionView />}
+          </AppShell>
+        )
+      case 'reports':
+        return (
+          <AppShell>
+            <ReportsView />
+          </AppShell>
+        )
+      case 'admin':
+        return (
+          <AppShell>
+            <AdminView />
+          </AppShell>
+        )
+      case 'settings':
+        return (
+          <AppShell>
+            <SettingsView />
+          </AppShell>
+        )
+      case 'home':
       default:
-        return <LoginView />
+        return (
+          <AppShell>
+            <HomeView />
+          </AppShell>
+        )
     }
   }
 
-  switch (view) {
-    case 'students':
-    case 'student':
-      return (
-        <AppShell>
-          {view === 'students' ? <StudentsView /> : <StudentView />}
-        </AppShell>
-      )
-    case 'courses':
-      return (
-        <AppShell>
-          <CoursesView />
-        </AppShell>
-      )
-    case 'schedule':
-      return (
-        <AppShell>
-          <ScheduleView />
-        </AppShell>
-      )
-    case 'sessions':
-    case 'session':
-      return (
-        <AppShell>
-          {view === 'sessions' ? <SessionsView /> : <SessionView />}
-        </AppShell>
-      )
-    case 'reports':
-      return (
-        <AppShell>
-          <ReportsView />
-        </AppShell>
-      )
-    case 'admin':
-      return (
-        <AppShell>
-          <AdminView />
-        </AppShell>
-      )
-    case 'settings':
-      return (
-        <AppShell>
-          <SettingsView />
-        </AppShell>
-      )
-    case 'home':
-    default:
-      return (
-        <AppShell>
-          <HomeView />
-        </AppShell>
-      )
-  }
+  return (
+    <>
+      {renderView()}
+      <InstallPwaPrompt />
+    </>
+  )
 }

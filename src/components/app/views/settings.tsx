@@ -56,6 +56,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { IdentityAvatar, LoadingBlock } from '@/components/app/shared'
+import { BrandIcon } from '@/components/brand/brand-logo'
 
 const DEFAULTS: AppSettings = { atRiskThreshold: 75, defaultMode: 'WALKTHROUGH' }
 
@@ -548,10 +549,18 @@ export default function SettingsView() {
 
           <Separator />
 
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Package className="h-3.5 w-3.5" />
-            Prezaro v1.0 · PWA
-          </p>
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-3">
+              <BrandIcon className="h-8 w-8 shadow-sm" />
+              <div>
+                <p className="text-xs font-semibold text-foreground">Prezaro v1.0</p>
+                <p className="text-[10px] text-muted-foreground">Progressive Web App · Face Biometrics</p>
+              </div>
+            </div>
+            <span className="text-[11px] font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full">
+              PWA Ready
+            </span>
+          </div>
         </section>
 
         {/* ---------- Data & privacy ---------- */}

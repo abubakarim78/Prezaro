@@ -9,6 +9,7 @@ import { writeCachedUser } from '@/lib/session-cache'
 import { useAppStore } from '@/lib/store'
 import type { LoginResponse } from '@/lib/types'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
+import { BrandLogo } from '@/components/brand/brand-logo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -123,13 +124,10 @@ export default function LoginView() {
         transition={{ duration: 0.28, ease: 'easeOut' }}
         className="relative w-full max-w-sm"
       >
-        {/* Glyph + wordmark */}
+        {/* Brand logo (adaptive light/dark) */}
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
-            <FaceScanMark className="h-9 w-9" />
-          </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">Prezaro</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <BrandLogo className="h-32 w-32 rounded-2xl overflow-hidden shadow-lg shadow-primary/20 border border-border/50" />
+          <p className="mt-3 text-sm text-muted-foreground">
             Face attendance for lecture halls
           </p>
         </div>

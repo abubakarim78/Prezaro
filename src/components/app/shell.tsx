@@ -32,6 +32,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
+import { BrandIcon } from '@/components/brand/brand-logo'
 import { api, clearAuthToken } from '@/lib/api'
 import { clearCachedUser } from '@/lib/session-cache'
 import { pendingCount } from '@/lib/offline'
@@ -114,9 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* ---------- Desktop sidebar ---------- */}
       <aside className="hidden lg:flex w-64 flex-col border-r bg-sidebar sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-5 h-16 border-b">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <FaceScanMark className="h-5 w-5" />
-          </div>
+          <BrandIcon className="h-9 w-9 shadow-sm" />
           <div className="leading-tight">
             <p className="font-semibold tracking-tight">Prezaro</p>
             <p className="text-[11px] text-muted-foreground">Face attendance</p>
@@ -211,9 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Mobile top bar */}
         <header className="lg:hidden sticky top-0 z-30 bg-background/85 backdrop-blur border-b pt-safe">
           <div className="h-14 flex items-center gap-3 px-4">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <FaceScanMark className="h-[18px] w-[18px]" />
-            </div>
+            <BrandIcon className="h-8 w-8 shadow-sm" />
             <div className="min-w-0 flex-1 leading-tight">
               <p className="font-semibold tracking-tight text-sm">Prezaro</p>
               <p className="text-[10px] text-muted-foreground truncate">

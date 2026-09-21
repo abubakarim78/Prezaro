@@ -19,6 +19,7 @@ import { useAppStore } from '@/lib/store'
 import type { Course, CoursesResponse, DepartmentsResponse, TermSystem, User } from '@/lib/types'
 import { termBadge } from '@/lib/types'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
+import { BrandIcon } from '@/components/brand/brand-logo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -248,9 +249,7 @@ export default function OnboardingView() {
       <div className="mx-auto w-full max-w-md flex-1 px-4 py-6">
         {/* Header */}
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <FaceScanMark className="h-5 w-5" />
-          </div>
+          <BrandIcon className="h-9 w-9 shadow-sm" />
           <div className="leading-tight">
             <p className="font-semibold tracking-tight">Prezaro</p>
             <p className="text-[11px] text-muted-foreground">
