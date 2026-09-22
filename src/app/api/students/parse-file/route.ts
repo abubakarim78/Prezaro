@@ -20,7 +20,13 @@ export async function POST(req: Request) {
   return handle(async () => {
     await requireUser(req)
 
-    const formData = await req.formData()
+    let formData: FormData
+    try {
+      formData = await req.formData()
+    } catch (err: any) {
+      throw new BadRequestError(`Failed to read uploaded file: ${err?.message || 'Invalid form data'}`)
+    }
+
     const file = formData.get('file') as File | null
     const defaultLevel = Number(formData.get('defaultLevel')) || 100
 
@@ -51,6 +57,11 @@ export async function POST(req: Request) {
       try {
         result = await parseDocxBuffer(buffer, defaultLevel)
       } catch (err: any) {
+        if (ext === '.doc') {
+          throw new BadRequestError(
+            'Older Word 97-2003 (.doc) binary files are not supported directly. Please save the document as modern Word (.docx) or Excel (.xlsx) before uploading.'
+          )
+        }
         throw new BadRequestError(`Failed to parse Word document: ${err.message || 'Invalid format'}`)
       }
     } else if (ext === '.csv' || ext === '.tsv' || ext === '.txt') {

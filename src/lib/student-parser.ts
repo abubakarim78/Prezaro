@@ -34,6 +34,7 @@ export interface ParseResult {
   format: 'excel' | 'docx' | 'csv' | 'text'
   headers: string[]
   rawRowsSample: string[][]
+  rawGrid?: string[][]
   detectedMapping: ColumnMapping
   students: ParsedStudentRow[]
   totalDetected: number
@@ -424,7 +425,7 @@ export function parseExcelBuffer(buffer: Buffer, defaultLevel = 100): ParseResul
   const detectedMapping = detectColumnMapping(headers, grid.slice(dataStartRow))
   const students = extractStudentsFromGrid(grid, detectedMapping, dataStartRow, defaultLevel)
 
-  return buildParseResult('excel', headers, rawRowsSample, detectedMapping, students)
+  return buildParseResult('excel', headers, rawRowsSample, detectedMapping, students, grid.slice(dataStartRow))
 }
 
 // ---- Word Parser (.docx) -------------------------------------
@@ -466,7 +467,7 @@ export async function parseDocxBuffer(buffer: Buffer, defaultLevel = 100): Promi
     const detectedMapping = detectColumnMapping(headers, bestTable.slice(dataStartRow))
     const students = extractStudentsFromGrid(bestTable, detectedMapping, dataStartRow, defaultLevel)
 
-    return buildParseResult('docx', headers, rawRowsSample, detectedMapping, students)
+    return buildParseResult('docx', headers, rawRowsSample, detectedMapping, students, bestTable.slice(dataStartRow))
   }
 
   // 2. If no table in docx, extract raw text lines
@@ -511,7 +512,7 @@ export function parseTextRoster(
   const detectedMapping = detectColumnMapping(headers, grid.slice(dataStartRow))
   const students = extractStudentsFromGrid(grid, detectedMapping, dataStartRow, defaultLevel)
 
-  return buildParseResult(formatType === 'docx' ? 'docx' : 'csv', headers, rawRowsSample, detectedMapping, students)
+  return buildParseResult(formatType === 'docx' ? 'docx' : 'csv', headers, rawRowsSample, detectedMapping, students, grid.slice(dataStartRow))
 }
 
 // ---- Helper to structure ParseResult --------------------------
@@ -521,7 +522,8 @@ function buildParseResult(
   headers: string[],
   rawRowsSample: string[][],
   detectedMapping: ColumnMapping,
-  students: ParsedStudentRow[]
+  students: ParsedStudentRow[],
+  rawGrid?: string[][]
 ): ParseResult {
   const validCount = students.filter((s) => s.isValid).length
   const duplicateCount = students.filter((s) => s.isDuplicate).length
@@ -531,6 +533,7 @@ function buildParseResult(
     format,
     headers,
     rawRowsSample,
+    rawGrid,
     detectedMapping,
     students,
     totalDetected: students.length,

@@ -141,6 +141,7 @@ export function ImportRosterDialog({
       setParseResult(data)
       setColumnMapping(data.detectedMapping)
       setStudents(data.students)
+      if (data.rawGrid) setGridData(data.rawGrid)
       setStep('preview')
       toast.success(`Extracted ${data.totalDetected} students from ${file.name}`)
     } catch (err) {
@@ -159,6 +160,7 @@ export function ImportRosterDialog({
       setParseResult(res)
       setColumnMapping(res.detectedMapping)
       setStudents(res.students)
+      if (res.rawGrid) setGridData(res.rawGrid)
       setStep('preview')
       toast.success(`Extracted ${res.totalDetected} student rows`)
     } catch (err) {

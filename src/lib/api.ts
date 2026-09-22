@@ -64,7 +64,8 @@ interface ApiOptions {
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { method = 'GET', body } = opts
   const headers: Record<string, string> = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
+  if (body !== undefined && !isFormData) headers['Content-Type'] = 'application/json'
   const token = getAuthToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
@@ -73,7 +74,7 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     res = await fetch(path, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData ? (body as FormData) : (body !== undefined ? JSON.stringify(body) : undefined),
       credentials: 'same-origin',
       cache: 'no-store',
     })
