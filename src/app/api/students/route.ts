@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { BadRequestError, requireUser } from '@/lib/auth'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
-import { queueEmail, studentRegisteredHtml } from '@/lib/email'
+import { queueEmail, studentRegisteredHtml, courseEnrollmentHtml } from '@/lib/email'
 import {
   handle,
   readJson,
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
   })
 }
 
-// ---- Create (single or bulk CSV) ------------------------------
+// ---- Create (single, bulk CSV, or parsed students array) -------
 
 const nullableTrimmedEmail = z.preprocess(
   (v) => (v === '' ? null : v),
@@ -72,10 +72,18 @@ const createSchema = z
   .object({
     single: singleSchema.optional(),
     bulk: z.string().optional(),
+    students: z.array(singleSchema).optional(),
+    courseId: z.string().optional(),
   })
-  .refine((d) => d.single !== undefined || d.bulk !== undefined, {
-    message: 'Provide either single or bulk',
-  })
+  .refine(
+    (d) =>
+      d.single !== undefined ||
+      d.bulk !== undefined ||
+      (d.students !== undefined && d.students.length > 0),
+    {
+      message: 'Provide single, bulk, or students array',
+    }
+  )
 
 interface ParsedRow {
   studentId: string
@@ -133,6 +141,12 @@ export async function POST(req: Request) {
     const parsed = createSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
 
+    // If courseId provided, ensure lecturer owns or can access the course
+    let targetCourse: { id: string; code: string; title: string } | null = null
+    if (parsed.data.courseId) {
+      targetCourse = await requireCourse(user, parsed.data.courseId)
+    }
+
     const rows: ParsedRow[] = []
     let skipped = 0
     if (parsed.data.single) {
@@ -145,6 +159,14 @@ export async function POST(req: Request) {
       const bulk = parseBulkCsv(parsed.data.bulk)
       rows.push(...bulk.rows)
       skipped += bulk.invalid
+    } else if (parsed.data.students !== undefined) {
+      for (const s of parsed.data.students) {
+        rows.push({
+          ...s,
+          email: s.email ?? null,
+          phone: s.phone ?? null,
+        })
+      }
     }
 
     // De-duplicate within the batch (first occurrence wins).
@@ -159,7 +181,7 @@ export async function POST(req: Request) {
       unique.push(row)
     }
 
-    // Skip studentIds that already exist.
+    // Check existing students.
     const existing = await db.student.findMany({
       where: { studentId: { in: unique.map((r) => r.studentId) } },
       select: { studentId: true },
@@ -216,10 +238,58 @@ export async function POST(req: Request) {
       }
     }
 
+    // Auto-enroll in course if requested (both newly created and existing matching students)
+    let enrolledCount = 0
+    if (targetCourse && unique.length > 0) {
+      const allBatchStudents = await db.student.findMany({
+        where: { studentId: { in: unique.map((r) => r.studentId) } },
+        select: { id: true, studentId: true, firstName: true, lastName: true, email: true },
+      })
+
+      const existingEnrollments = await db.enrollment.findMany({
+        where: {
+          courseId: targetCourse.id,
+          studentId: { in: allBatchStudents.map((s) => s.id) },
+        },
+        select: { studentId: true },
+      })
+      const alreadyEnrolled = new Set(existingEnrollments.map((e) => e.studentId))
+      const toEnroll = allBatchStudents.filter((s) => !alreadyEnrolled.has(s.id))
+
+      if (toEnroll.length > 0) {
+        await db.enrollment.createMany({
+          data: toEnroll.map((s) => ({
+            courseId: targetCourse!.id,
+            studentId: s.id,
+          })),
+        })
+        enrolledCount = toEnroll.length
+
+        for (const student of toEnroll) {
+          if (!student.email) continue
+          queueEmail({
+            to: student.email,
+            subject: `You've been enrolled in ${targetCourse!.code}`,
+            html: courseEnrollmentHtml(
+              `${student.firstName} ${student.lastName}`,
+              student.studentId,
+              targetCourse!.code,
+              targetCourse!.title,
+              user.name,
+            ),
+            type: 'COURSE_ENROLLMENT',
+            meta: { courseId: targetCourse!.id, studentRowId: student.id },
+          })
+        }
+      }
+    }
+
     return NextResponse.json({
       students: created.map(studentListItem),
       created: toCreate.length,
       skipped,
+      enrolled: enrolledCount,
+      courseCode: targetCourse?.code,
     })
   })
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   ChevronRight,
+  FileSpreadsheet,
   FileUp,
   Loader2,
   Plus,
@@ -23,6 +24,7 @@ import type {
   Course,
 } from '@/lib/types'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
+import { ImportRosterDialog } from '@/components/app/roster-import-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -71,7 +73,7 @@ export default function StudentsView() {
 
   // ---- dialogs ----
   const [newOpen, setNewOpen] = useState(false)
-  const [csvOpen, setCsvOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const loadCourses = useCallback(async () => {
     try {
@@ -189,8 +191,8 @@ export default function StudentsView() {
               <DropdownMenuItem onClick={() => setNewOpen(true)}>
                 <UserRoundPlus className="h-4 w-4" /> New student
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setCsvOpen(true)}>
-                <FileUp className="h-4 w-4" /> Import CSV
+              <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                <FileSpreadsheet className="h-4 w-4" /> Import roster (Excel, Word, CSV)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -267,11 +269,16 @@ export default function StudentsView() {
                 <EmptyState
                   icon={Users}
                   title="No students yet"
-                  description="Add students one by one or import a CSV list."
+                  description="Add students one by one or import an Excel, Word, or CSV roster."
                   action={
-                    <Button className="min-h-11" onClick={() => setNewOpen(true)}>
-                      <UserRoundPlus className="h-4 w-4" /> Add student
-                    </Button>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <Button className="min-h-11" onClick={() => setNewOpen(true)}>
+                        <UserRoundPlus className="h-4 w-4" /> Add student
+                      </Button>
+                      <Button variant="outline" className="min-h-11" onClick={() => setImportOpen(true)}>
+                        <FileSpreadsheet className="h-4 w-4" /> Import roster
+                      </Button>
+                    </div>
                   }
                 />
               )}
@@ -321,7 +328,13 @@ export default function StudentsView() {
         onOpenChange={setNewOpen}
         onCreated={refresh}
       />
-      <ImportCsvDialog open={csvOpen} onOpenChange={setCsvOpen} onImported={refresh} />
+      <ImportRosterDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        courses={courses}
+        defaultCourseId={courseFilter !== 'all' ? courseFilter : undefined}
+        onImported={refresh}
+      />
     </div>
   )
 }
@@ -523,141 +536,4 @@ function NewStudentDialog({
   )
 }
 
-// ---------- import CSV dialog ----------
 
-interface CsvRow {
-  studentId: string
-  firstName: string
-  lastName: string
-  level: number
-  email?: string
-  phone?: string
-}
-
-function parseCsv(text: string): { rows: CsvRow[]; invalid: number; dupes: number } {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-  const rows: CsvRow[] = []
-  let invalid = 0
-  for (const line of lines) {
-    const parts = line.split(',').map((p) => p.trim())
-    if (parts.length < 4) {
-      invalid++
-      continue
-    }
-    const [studentId, firstName, lastName, level, email, phone] = parts
-    if (
-      !studentId ||
-      !firstName ||
-      !lastName ||
-      !/^\d+$/.test(level) ||
-      !STUDENT_ID_PATTERN.test(studentId)
-    ) {
-      invalid++
-      continue
-    }
-    rows.push({
-      studentId,
-      firstName,
-      lastName,
-      level: Number(level),
-      email: email || undefined,
-      phone: phone || undefined,
-    })
-  }
-  const seen = new Set<string>()
-  let dupes = 0
-  for (const r of rows) {
-    if (seen.has(r.studentId)) dupes++
-    else seen.add(r.studentId)
-  }
-  return { rows, invalid, dupes }
-}
-
-function ImportCsvDialog({
-  open,
-  onOpenChange,
-  onImported,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  onImported: () => void
-}) {
-  const [text, setText] = useState('')
-  const [importing, setImporting] = useState(false)
-
-  const parsed = useMemo(() => parseCsv(text), [text])
-
-  const submit = async () => {
-    if (parsed.rows.length === 0) return
-    setImporting(true)
-    try {
-      const resp = await api<StudentsResponse & { created: number; skipped: number }>(
-        '/api/students',
-        { method: 'POST', body: { bulk: text } }
-      )
-      toast.success(`Created ${resp.created ?? parsed.rows.length}, skipped ${resp.skipped ?? 0}`)
-      onOpenChange(false)
-      setText('')
-      onImported()
-    } catch (e) {
-      toast.error(getErrorMessage(e))
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Import CSV</DialogTitle>
-          <DialogDescription>
-            Paste one student per line:{' '}
-            <span className="font-mono text-xs">studentId,firstName,lastName,level[,email[,phone]]</span>
-          </DialogDescription>
-        </DialogHeader>
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={'PHA/0001/26,Ama,Mensah,300\nPHA/0002/26,Kofi,Boateng,300,ama@stu.edu'}
-          className="min-h-40 font-mono text-xs"
-          aria-label="CSV rows"
-        />
-        {text.trim().length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <span className="font-medium text-emerald-700 dark:text-emerald-400">
-              {parsed.rows.length} row{parsed.rows.length === 1 ? '' : 's'} detected
-            </span>
-            {parsed.dupes > 0 && (
-              <span className="text-amber-600 dark:text-amber-400">
-                {parsed.dupes} duplicate{parsed.dupes === 1 ? '' : 's'} in file
-              </span>
-            )}
-            {parsed.invalid > 0 && (
-              <span className="text-destructive">
-                {parsed.invalid} invalid line{parsed.invalid === 1 ? '' : 's'}
-              </span>
-            )}
-            <span className="text-muted-foreground">Existing IDs are skipped automatically.</span>
-          </div>
-        )}
-        <DialogFooter className="gap-2">
-          <Button variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => onOpenChange(false)} disabled={importing}>
-            Cancel
-          </Button>
-          <Button
-            className="min-h-11 flex-1 sm:flex-none"
-            onClick={submit}
-            disabled={importing || parsed.rows.length === 0}
-          >
-            {importing && <Loader2 className="h-4 w-4 animate-spin" />} Import{' '}
-            {parsed.rows.length > 0 ? `${parsed.rows.length} students` : ''}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
