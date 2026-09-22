@@ -9,6 +9,7 @@ import {
   Pencil,
   ScanFace,
   SearchX,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react'
@@ -79,6 +80,8 @@ export default function StudentView() {
   const [courseBusy, setCourseBusy] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   // No synchronous setState so this can be safely triggered from effects;
   // retry handlers set loading themselves first.
@@ -167,6 +170,20 @@ export default function StudentView() {
       load()
     } catch (e) {
       toast.error(getErrorMessage(e))
+    }
+  }
+
+  const deleteStudent = async () => {
+    if (!student) return
+    setDeleteBusy(true)
+    try {
+      await api(`/api/students/${student.id}`, { method: 'DELETE' })
+      toast.success('Student deleted')
+      setDeleteOpen(false)
+      navigate('students')
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+      setDeleteBusy(false)
     }
   }
 
@@ -269,15 +286,26 @@ export default function StudentView() {
             Level {student.level}
           </Badge>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 shrink-0"
-          onClick={() => setEditOpen(true)}
-          aria-label="Edit student"
-        >
-          <Pencil className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-11 w-11"
+            onClick={() => setEditOpen(true)}
+            aria-label="Edit student"
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-11 w-11 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setDeleteOpen(true)}
+            aria-label="Delete student"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="mt-5 space-y-4">
@@ -452,6 +480,39 @@ export default function StudentView() {
         student={student}
         onSaved={(s) => setStudent(s)}
       />
+
+      {/* ---------- Delete confirmation ---------- */}
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => !open && !deleteBusy && setDeleteOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete student?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete{' '}
+              <span className="font-semibold text-foreground">
+                {student.firstName} {student.lastName} ({student.studentId})
+              </span>
+              ? All their attendance records, face biometric enrollment, and course memberships
+              will be permanently removed. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteStudent}
+              disabled={deleteBusy}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting…
+                </>
+              ) : (
+                'Delete student'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
   )
 }

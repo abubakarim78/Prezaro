@@ -75,3 +75,19 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ student: detail })
   })
 }
+
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  return handle(async () => {
+    const user = await requireUser(req)
+    const { id } = await ctx.params
+    await requireStudent(user, id)
+
+    await db.$transaction([
+      db.attendanceRecord.deleteMany({ where: { studentId: id } }),
+      db.enrollment.deleteMany({ where: { studentId: id } }),
+      db.student.delete({ where: { id } }),
+    ])
+
+    return NextResponse.json({ ok: true, deletedId: id })
+  })
+}

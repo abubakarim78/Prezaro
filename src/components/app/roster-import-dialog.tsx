@@ -55,6 +55,7 @@ import {
   extractStudentsFromGrid,
   parseTextRoster,
 } from '@/lib/student-parser'
+import { sortStudentsByYearId } from '@/lib/student-sort'
 
 const LEVELS = [100, 200, 300, 400, 500, 600] as const
 
@@ -208,7 +209,7 @@ export function ImportRosterDialog({
         1,
         defaultLevel
       )
-      setStudents(reExtracted)
+      setStudents(sortStudentsByYearId(reExtracted))
     }
   }
 

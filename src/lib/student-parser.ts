@@ -7,6 +7,7 @@
 import * as XLSX from 'xlsx'
 import * as mammoth from 'mammoth'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
+import { sortStudentsByYearId } from '@/lib/student-sort'
 
 export interface ParsedStudentRow {
   studentId: string
@@ -525,9 +526,10 @@ function buildParseResult(
   students: ParsedStudentRow[],
   rawGrid?: string[][]
 ): ParseResult {
-  const validCount = students.filter((s) => s.isValid).length
-  const duplicateCount = students.filter((s) => s.isDuplicate).length
-  const invalidCount = students.filter((s) => !s.isValid && !s.isDuplicate).length
+  const sorted = sortStudentsByYearId(students)
+  const validCount = sorted.filter((s) => s.isValid).length
+  const duplicateCount = sorted.filter((s) => s.isDuplicate).length
+  const invalidCount = sorted.filter((s) => !s.isValid && !s.isDuplicate).length
 
   return {
     format,
@@ -535,8 +537,8 @@ function buildParseResult(
     rawRowsSample,
     rawGrid,
     detectedMapping,
-    students,
-    totalDetected: students.length,
+    students: sorted,
+    totalDetected: sorted.length,
     validCount,
     duplicateCount,
     invalidCount,

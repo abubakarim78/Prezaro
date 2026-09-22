@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { BadRequestError, requireUser } from '@/lib/auth'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
+import { sortStudentsByYearId } from '@/lib/student-sort'
 import { queueEmail, studentRegisteredHtml, courseEnrollmentHtml } from '@/lib/email'
 import {
   handle,
@@ -39,9 +40,8 @@ export async function GET(req: Request) {
     const students = await db.student.findMany({
       where,
       include: studentWithCoursesInclude,
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     })
-    return NextResponse.json({ students: students.map(studentListItem) })
+    return NextResponse.json({ students: sortStudentsByYearId(students.map(studentListItem)) })
   })
 }
 
@@ -285,7 +285,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
-      students: created.map(studentListItem),
+      students: sortStudentsByYearId(created.map(studentListItem)),
       created: toCreate.length,
       skipped,
       enrolled: enrolledCount,

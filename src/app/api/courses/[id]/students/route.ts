@@ -12,6 +12,8 @@ import {
   zodMessage,
 } from '../../../_lib/helpers'
 
+import { sortStudentsByYearId } from '@/lib/student-sort'
+
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const user = await requireUser(req)
@@ -22,14 +24,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       where: { courseId: course.id },
       include: { student: { include: studentWithCoursesInclude } },
     })
-    const students = enrollments
-      .map((e) => e.student)
-      .sort(
-        (a, b) =>
-          a.lastName.localeCompare(b.lastName) ||
-          a.firstName.localeCompare(b.firstName),
-      )
-      .map(studentListItem)
+    const students = sortStudentsByYearId(
+      enrollments.map((e) => studentListItem(e.student))
+    )
     return NextResponse.json({ students })
   })
 }

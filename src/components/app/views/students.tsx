@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
+  ArrowUpDown,
   ChevronRight,
+  Eye,
   FileSpreadsheet,
   FileUp,
   Loader2,
+  MoreVertical,
   Plus,
   ScanFace,
   Search,
+  Trash2,
+  UserMinus,
   UserRoundPlus,
   Users,
 } from 'lucide-react'
@@ -24,6 +29,7 @@ import type {
   Course,
 } from '@/lib/types'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
+import { compareStudentIds } from '@/lib/student-sort'
 import { ImportRosterDialog } from '@/components/app/roster-import-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +45,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,10 +86,58 @@ export default function StudentsView() {
   const [courseFilter, setCourseFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'year-asc' | 'year-desc' | 'name-asc' | 'level'>('year-asc')
 
   // ---- dialogs ----
   const [newOpen, setNewOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [unenrollTarget, setUnenrollTarget] = useState<{
+    student: StudentListItem
+    courseId: string
+    courseCode?: string
+  } | null>(null)
+  const [unenrollBusy, setUnenrollBusy] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<StudentListItem | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const handleUnenroll = async () => {
+    if (!unenrollTarget) return
+    setUnenrollBusy(true)
+    try {
+      await api(
+        `/api/courses/${unenrollTarget.courseId}/students?studentId=${unenrollTarget.student.id}`,
+        { method: 'DELETE' }
+      )
+      toast.success(
+        `Removed ${unenrollTarget.student.firstName} ${unenrollTarget.student.lastName} from ${
+          unenrollTarget.courseCode || 'class'
+        }`
+      )
+      setStudents((prev) => (prev ? prev.filter((s) => s.id !== unenrollTarget.student.id) : null))
+      setUnenrollTarget(null)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setUnenrollBusy(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleteBusy(true)
+    try {
+      await api(`/api/students/${deleteTarget.id}`, { method: 'DELETE' })
+      toast.success(
+        `Student ${deleteTarget.firstName} ${deleteTarget.lastName} permanently deleted`
+      )
+      setStudents((prev) => (prev ? prev.filter((s) => s.id !== deleteTarget.id) : null))
+      setDeleteTarget(null)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
 
   const loadCourses = useCallback(async () => {
     try {
@@ -152,13 +216,30 @@ export default function StudentsView() {
   }, [search])
 
   const filtered = useMemo(() => {
-    const list = students ?? []
-    if (!query) return list
-    return list.filter((s) => {
-      const hay = `${s.firstName} ${s.lastName} ${s.studentId}`.toLowerCase()
-      return hay.includes(query)
+    let list = students ?? []
+    if (query) {
+      list = list.filter((s) => {
+        const hay = `${s.firstName} ${s.lastName} ${s.studentId}`.toLowerCase()
+        return hay.includes(query)
+      })
+    }
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'year-asc') {
+        return compareStudentIds(a.studentId, b.studentId, 'asc')
+      }
+      if (sortBy === 'year-desc') {
+        return compareStudentIds(a.studentId, b.studentId, 'desc')
+      }
+      if (sortBy === 'name-asc') {
+        return a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName)
+      }
+      if (sortBy === 'level') {
+        return a.level - b.level || compareStudentIds(a.studentId, b.studentId, 'asc')
+      }
+      return compareStudentIds(a.studentId, b.studentId, 'asc')
     })
-  }, [students, query])
+  }, [students, query, sortBy])
 
   const refresh = () => {
     setLoading(true)
@@ -200,16 +281,38 @@ export default function StudentsView() {
       />
 
       <div className="px-4 pb-6 lg:px-8">
-        {/* ---------- Search ---------- */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name or student ID…"
-            className="h-11 pl-9"
-            aria-label="Search students"
-          />
+        {/* ---------- Search & Sort ---------- */}
+        <div className="flex gap-2 items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name or student ID…"
+              className="h-11 pl-9"
+              aria-label="Search students"
+            />
+          </div>
+          <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
+            <SelectTrigger className="h-11 w-44 sm:w-52 text-xs font-medium shrink-0" aria-label="Sort students">
+              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground mr-1.5 shrink-0" />
+              <SelectValue placeholder="Sort" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="year-asc" className="text-xs">
+                Year & ID (Earliest first)
+              </SelectItem>
+              <SelectItem value="year-desc" className="text-xs">
+                Year & ID (Latest first)
+              </SelectItem>
+              <SelectItem value="name-asc" className="text-xs">
+                Name (A–Z)
+              </SelectItem>
+              <SelectItem value="level" className="text-xs">
+                Level (100–600)
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* ---------- Course filter chips ---------- */}
@@ -286,36 +389,79 @@ export default function StudentsView() {
           ) : (
             <div className="max-h-[32rem] divide-y divide-border rounded-2xl border bg-card overflow-y-auto scrollbar-thin">
               {filtered.map((s, i) => (
-                <motion.button
+                <motion.div
                   key={s.id}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.2, delay: Math.min(i * 0.03, 0.25) }}
-                  onClick={() => navigate('student', { studentId: s.id })}
-                  className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+                  className="flex min-h-16 w-full items-center gap-2 px-4 py-3 transition-colors hover:bg-accent/40 group"
                 >
-                  <IdentityAvatar name={`${s.firstName} ${s.lastName}`} />
-                  <span className="min-w-0 flex-1 leading-tight">
-                    <span className="block truncate text-sm font-medium">
-                      {s.firstName} {s.lastName}
-                    </span>
-                    <span className="block font-mono text-xs text-muted-foreground">
-                      {s.studentId} · L{s.level}
-                    </span>
-                  </span>
-                  <span
-                    title={s.faceEnrolled ? 'Face enrolled' : 'Face not enrolled'}
-                    className={cn(
-                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                      s.faceEnrolled
-                        ? 'bg-emerald-600/10 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-muted text-muted-foreground/50'
-                    )}
+                  <button
+                    type="button"
+                    onClick={() => navigate('student', { studentId: s.id })}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none"
                   >
-                    <ScanFace className="h-4 w-4" />
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </motion.button>
+                    <IdentityAvatar name={`${s.firstName} ${s.lastName}`} />
+                    <span className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-sm font-medium">
+                        {s.firstName} {s.lastName}
+                      </span>
+                      <span className="block font-mono text-xs text-muted-foreground">
+                        {s.studentId} · L{s.level}
+                      </span>
+                    </span>
+                    <span
+                      title={s.faceEnrolled ? 'Face enrolled' : 'Face not enrolled'}
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                        s.faceEnrolled
+                          ? 'bg-emerald-600/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-muted text-muted-foreground/50'
+                      )}
+                    >
+                      <ScanFace className="h-4 w-4" />
+                    </span>
+                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+                        aria-label={`Options for ${s.firstName} ${s.lastName}`}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onClick={() => navigate('student', { studentId: s.id })}>
+                        <Eye className="h-4 w-4 mr-2" /> View details
+                      </DropdownMenuItem>
+                      {courseFilter !== 'all' && (
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setUnenrollTarget({
+                              student: s,
+                              courseId: courseFilter,
+                              courseCode: courses.find((c) => c.id === courseFilter)?.code,
+                            })
+                          }
+                          className="text-amber-600 dark:text-amber-400 focus:text-amber-600 dark:focus:text-amber-400"
+                        >
+                          <UserMinus className="h-4 w-4 mr-2" /> Remove from class
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => setDeleteTarget(s)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" /> Delete student
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </motion.div>
               ))}
             </div>
           )}
@@ -335,6 +481,82 @@ export default function StudentsView() {
         defaultCourseId={courseFilter !== 'all' ? courseFilter : undefined}
         onImported={refresh}
       />
+
+      {/* ---------- Remove from Class (Unenroll) Confirmation ---------- */}
+      <AlertDialog
+        open={!!unenrollTarget}
+        onOpenChange={(open) => !open && !unenrollBusy && setUnenrollTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove from class?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove{' '}
+              <span className="font-semibold text-foreground">
+                {unenrollTarget?.student.firstName} {unenrollTarget?.student.lastName} (
+                {unenrollTarget?.student.studentId})
+              </span>{' '}
+              from{' '}
+              <span className="font-semibold text-foreground">
+                {unenrollTarget?.courseCode || 'this class'}
+              </span>
+              ? Their general student profile and enrollment in any other courses will be kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unenrollBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleUnenroll}
+              disabled={unenrollBusy}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {unenrollBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Removing…
+                </>
+              ) : (
+                'Remove from class'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ---------- Delete Student Confirmation ---------- */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && !deleteBusy && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete student?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete{' '}
+              <span className="font-semibold text-foreground">
+                {deleteTarget?.firstName} {deleteTarget?.lastName} ({deleteTarget?.studentId})
+              </span>
+              ? This will permanently delete their attendance records, face enrollment, and all
+              course memberships. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleteBusy}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting…
+                </>
+              ) : (
+                'Delete student'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
