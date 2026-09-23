@@ -316,7 +316,7 @@ export function ImportRosterDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[92vh] sm:max-w-3xl flex flex-col p-0 gap-0 overflow-hidden">
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b">
+        <div className="px-4 sm:px-6 pt-5 sm:pt-6 pb-4 border-b">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Sparkles className="h-5 w-5" />
@@ -331,7 +331,7 @@ export function ImportRosterDialog({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin">
           {step === 'parsing' && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -402,12 +402,20 @@ export function ImportRosterDialog({
 
               {/* Tabs: File Upload vs Direct Paste */}
               <Tabs value={tab} onValueChange={(v) => setTab(v as 'upload' | 'paste')} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 h-9 p-1">
-                  <TabsTrigger value="upload" className="text-xs gap-1.5">
-                    <FileUp className="h-3.5 w-3.5" /> Upload File (Excel / Word / CSV)
+                <TabsList className="grid w-full grid-cols-2 h-10 p-1">
+                  <TabsTrigger value="upload" className="text-xs gap-1.5 min-w-0 px-2">
+                    <FileUp className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      <span className="sm:hidden">Upload File</span>
+                      <span className="hidden sm:inline">Upload File (Excel / Word / CSV)</span>
+                    </span>
                   </TabsTrigger>
-                  <TabsTrigger value="paste" className="text-xs gap-1.5">
-                    <FileText className="h-3.5 w-3.5" /> Paste Text or CSV
+                  <TabsTrigger value="paste" className="text-xs gap-1.5 min-w-0 px-2">
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      <span className="sm:hidden">Paste Text / CSV</span>
+                      <span className="hidden sm:inline">Paste Text or CSV</span>
+                    </span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -418,7 +426,7 @@ export function ImportRosterDialog({
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     onClick={() => fileInputRef.current?.click()}
-                    className={`relative flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed transition-all cursor-pointer text-center ${
+                    className={`relative flex flex-col items-center justify-center p-5 sm:p-8 rounded-2xl border-2 border-dashed transition-all cursor-pointer text-center ${
                       isDragging
                         ? 'border-primary bg-primary/5 scale-[0.99]'
                         : 'border-border hover:border-primary/50 hover:bg-muted/40'
@@ -852,7 +860,7 @@ export function ImportRosterDialog({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="px-4 sm:px-6 py-4 border-t bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-muted-foreground text-center sm:text-left">
             {step === 'preview' ? (
               <span>
