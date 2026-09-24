@@ -7,7 +7,7 @@ mkdir -p /app/db
 echo "[prezaro] syncing database schema..."
 max_retries=30
 count=0
-until bunx prisma db push --skip-generate || [ $count -ge $max_retries ]; do
+until bunx prisma db push --accept-data-loss --skip-generate || [ $count -ge $max_retries ]; do
   count=$((count + 1))
   echo "[prezaro] waiting for database connection ($count/$max_retries)..."
   sleep 2
