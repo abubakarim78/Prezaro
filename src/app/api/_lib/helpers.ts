@@ -28,6 +28,7 @@ import {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
+  requireUser,
   type AuthUser,
 } from '@/lib/auth'
 
@@ -38,6 +39,7 @@ export {
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
+  requireUser,
   type AuthUser,
 }
 import { getUserSettings } from '@/lib/settings'
@@ -79,17 +81,36 @@ export function zodMessage(error: { issues: { message: string }[] }): string {
 
 // ---- DTO mappers ---------------------------------------------
 
-export function userDTO(u: User & { department?: Department | null }): UserDTO {
+export function userDTO(
+  u: User & {
+    department?: Department | null
+    institution?: import('@prisma/client').Institution | null
+  }
+): UserDTO {
+  const role: 'LECTURER' | 'ADMIN' | 'SUPERADMIN' =
+    u.role === 'SUPERADMIN' ? 'SUPERADMIN' : u.role === 'ADMIN' ? 'ADMIN' : 'LECTURER'
   return {
     id: u.id,
     email: u.email,
     name: u.name,
     title: u.title ?? null,
-    role: u.role === 'ADMIN' ? 'ADMIN' : 'LECTURER',
+    role,
     onboarded: u.onboarded,
     departmentId: u.departmentId ?? null,
     departmentName: u.department?.name ?? null,
+    institutionId: u.institutionId ?? null,
+    institutionName: u.institution?.name ?? null,
+    institutionSlug: u.institution?.slug ?? null,
   }
+}
+
+/** Guard requiring platform SUPERADMIN role */
+export async function requireSuperAdmin(req: Request): Promise<AuthUser> {
+  const user = await requireUser(req)
+  if (user.role !== 'SUPERADMIN') {
+    throw new ForbiddenError('Platform superadmin privileges required')
+  }
+  return user
 }
 
 export const courseCountInclude = Prisma.validator<Prisma.CourseInclude>()({

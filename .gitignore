@@ -58,10 +58,14 @@ db/.auth-secret
 db/.rollmark-instance
 db/.prezaro-instance
 
-# uploads & tool results
+# uploads, downloads & tool results
 upload/*
 !upload/.gitkeep
+download/*
+!download/.gitkeep
 tool-results/
+scripts/
 
-# Skills directory
+# Skills directory & local dev artifacts
 /skills/
+.zscripts/*.pid

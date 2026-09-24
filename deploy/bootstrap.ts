@@ -87,11 +87,14 @@ async function main(): Promise<void> {
 
   let departmentId: string | null = null
   if (departmentName) {
-    const dept = await db.department.upsert({
+    let dept = await db.department.findFirst({
       where: { name: departmentName },
-      update: {},
-      create: { name: departmentName, code: deptCode(departmentName) },
     })
+    if (!dept) {
+      dept = await db.department.create({
+        data: { name: departmentName, code: deptCode(departmentName) },
+      })
+    }
     departmentId = dept.id
   }
 

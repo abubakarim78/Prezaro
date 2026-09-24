@@ -9,31 +9,62 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Institution {
+  id                  String       @id @default(cuid())
+  name                String
+  code                String       // e.g. UDS, KNUST, CU
+  slug                String       @unique // e.g. uds, knust, main
+  logoUrl             String?
+  primaryColor        String?      @default("#059669")
+  contactEmail        String?
+  contactPhone        String?
+  plan                String       @default("TRIAL") // TRIAL | FACULTY | CAMPUS_ANNUAL | ENTERPRISE
+  status              String       @default("ACTIVE") // ACTIVE | SUSPENDED | PENDING
+  maxStudents         Int          @default(1000)
+  maxCourses          Int          @default(100)
+  allowedModes        String       @default("ALL") // ALL | WALKTHROUGH_ONLY | KIOSK_ONLY
+  confidenceThreshold Float        @default(0.48) // 0.40 - 0.60
+  lateGraceMinutes    Int          @default(15) // minutes after start
+  termSystem          String       @default("SEMESTER") // SEMESTER | TRIMESTER | QUARTER
+  atRiskThreshold     Int          @default(75) // % required attendance
+  featuresJson        String       @default("{}") // Dynamic JSON flags: { allowOffline: true, requireConsent: true, notifyEmail: true, notifyPush: true }
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  departments         Department[]
+  users               User[]
+}
+
 model Department {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  code      String
-  createdAt DateTime @default(now())
-  users     User[]
-  courses   Course[]
-  students  Student[]
+  id            String       @id @default(cuid())
+  name          String
+  code          String
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  users         User[]
+  courses       Course[]
+  students      Student[]
+
+  @@unique([name, institutionId])
 }
 
 model User {
-  id           String      @id @default(cuid())
-  email        String      @unique
-  passwordHash String
-  name         String
-  title        String?
-  role         String      @default("LECTURER") // LECTURER | ADMIN
-  onboarded    Boolean     @default(false)
-  settingsJson String      @default("{}")
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
-  taughtCourses Course[]   @relation("CourseLecturer")
-  sessions     Session[]   @relation("SessionLecturer")
-  schedules    ClassSchedule[]
-  createdAt    DateTime    @default(now())
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String
+  name          String
+  title         String?
+  role          String       @default("LECTURER") // LECTURER | ADMIN | SUPERADMIN
+  onboarded     Boolean      @default(false)
+  settingsJson  String       @default("{}")
+  departmentId  String?
+  department    Department?  @relation(fields: [departmentId], references: [id])
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  taughtCourses Course[]     @relation("CourseLecturer")
+  sessions      Session[]    @relation("SessionLecturer")
+  schedules     ClassSchedule[]
+  createdAt     DateTime     @default(now())
 }
 
 model Course {

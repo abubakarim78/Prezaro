@@ -3,11 +3,39 @@
 // Every view + API route codes against these shapes.
 // ============================================================
 
-export type Role = 'LECTURER' | 'ADMIN'
+export type Role = 'LECTURER' | 'ADMIN' | 'SUPERADMIN'
 export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
-export type TermSystem = 'SEMESTER' | 'TRIMESTER'
+export type TermSystem = 'SEMESTER' | 'TRIMESTER' | 'QUARTER'
+
+export interface Institution {
+  id: string
+  name: string
+  code: string
+  slug: string
+  logoUrl?: string | null
+  primaryColor?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  plan: 'TRIAL' | 'FACULTY' | 'CAMPUS_ANNUAL' | 'ENTERPRISE'
+  status: 'ACTIVE' | 'SUSPENDED' | 'PENDING'
+  maxStudents: number
+  maxCourses: number
+  allowedModes: 'ALL' | 'WALKTHROUGH_ONLY' | 'KIOSK_ONLY'
+  confidenceThreshold: number
+  lateGraceMinutes: number
+  termSystem: TermSystem
+  atRiskThreshold: number
+  featuresJson: string
+  createdAt: string
+  updatedAt: string
+  studentCount?: number
+  courseCount?: number
+  sessionCount?: number
+  lecturerCount?: number
+  departmentCount?: number
+}
 
 export interface User {
   id: string
@@ -18,12 +46,23 @@ export interface User {
   onboarded: boolean
   departmentId?: string | null
   departmentName?: string | null
+  institutionId?: string | null
+  institutionName?: string | null
+  institutionSlug?: string | null
+  courseCount?: number
+  sessionCount?: number
+  createdAt?: string
+}
+
+export interface PlatformUsersResponse {
+  users: User[]
 }
 
 export interface Department {
   id: string
   name: string
   code: string
+  institutionId?: string | null
 }
 
 export interface Course {
@@ -282,3 +321,49 @@ export interface TestEmailResponse {
   ok: boolean
   status: EmailLogStatus
 }
+
+// ---- Platform / Multi-Institution Admin ----------------------
+
+export interface PlatformStats {
+  institutionsCount: number
+  activeInstitutionsCount: number
+  studentsCount: number
+  coursesCount: number
+  sessionsCount: number
+  recordsCount: number
+  activeLicenses: {
+    trial: number
+    faculty: number
+    campusAnnual: number
+    enterprise: number
+  }
+}
+
+export interface PlatformInstitutionsResponse {
+  institutions: Institution[]
+  stats: PlatformStats
+}
+
+export interface PlatformInstitutionResponse {
+  institution: Institution
+}
+
+export interface InstitutionInput {
+  name: string
+  code: string
+  slug: string
+  plan?: 'TRIAL' | 'FACULTY' | 'CAMPUS_ANNUAL' | 'ENTERPRISE'
+  status?: 'ACTIVE' | 'SUSPENDED' | 'PENDING'
+  maxStudents?: number
+  maxCourses?: number
+  allowedModes?: 'ALL' | 'WALKTHROUGH_ONLY' | 'KIOSK_ONLY'
+  confidenceThreshold?: number
+  lateGraceMinutes?: number
+  termSystem?: TermSystem
+  atRiskThreshold?: number
+  contactEmail?: string
+  contactPhone?: string
+  primaryColor?: string
+  featuresJson?: string
+}
+

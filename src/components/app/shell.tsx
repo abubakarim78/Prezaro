@@ -20,6 +20,8 @@ import {
   LogOut,
   Download,
   Smartphone,
+  Building2,
+  Globe2,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -138,7 +140,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {label}
             </button>
           ))}
-          {user.role === 'ADMIN' && (
+          {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
             <button
               onClick={() => navigate('admin')}
               className={cn(
@@ -150,6 +152,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <ShieldCheck className="h-[18px] w-[18px]" />
               Department
+            </button>
+          )}
+          {user.role === 'SUPERADMIN' && (
+            <button
+              onClick={() => navigate('platform')}
+              className={cn(
+                'w-full flex items-center gap-3 rounded-xl px-3 h-11 text-sm font-medium transition-colors',
+                view === 'platform'
+                  ? 'bg-primary text-primary-foreground shadow-xs'
+                  : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
+              )}
+            >
+              <Globe2 className="h-[18px] w-[18px]" />
+              Platform Admin
             </button>
           )}
         </nav>
@@ -192,6 +208,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <DropdownMenuItem onClick={() => navigate('settings')}>
                   <Settings className="h-4 w-4" /> Settings
                 </DropdownMenuItem>
+                {user.role === 'SUPERADMIN' && (
+                  <DropdownMenuItem onClick={() => navigate('platform')}>
+                    <Globe2 className="h-4 w-4" /> Platform Admin
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={tryInstall}>
                   <Download className="h-4 w-4" /> Install app
                 </DropdownMenuItem>
@@ -291,8 +312,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </SheetHeader>
               <div className="px-4 pb-6 space-y-1.5">
                 <MoreItem icon={CalendarDays} label="Class Timetable" onClick={() => navTo('schedule')} />
-                {user.role === 'ADMIN' && (
+                {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
                   <MoreItem icon={ShieldCheck} label="Department dashboard" onClick={() => navTo('admin')} />
+                )}
+                {user.role === 'SUPERADMIN' && (
+                  <MoreItem icon={Globe2} label="Platform Control Center" onClick={() => navTo('platform')} />
                 )}
                 <MoreItem icon={BarChart3} label="Reports" onClick={() => navTo('reports')} />
                 <MoreItem icon={Settings} label="Settings" onClick={() => navTo('settings')} />

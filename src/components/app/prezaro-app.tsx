@@ -28,6 +28,7 @@ import ReportsView from '@/components/app/views/reports'
 import AdminView from '@/components/app/views/admin'
 import SettingsView from '@/components/app/views/settings'
 import ScheduleView from '@/components/app/views/schedule'
+import PlatformAdminView from '@/components/app/views/platform-admin'
 import { AppShell } from '@/components/app/shell'
 
 /** Views rendered full-screen without the nav shell */
@@ -253,6 +254,12 @@ function PrezaroInner() {
         return (
           <AppShell>
             <AdminView />
+          </AppShell>
+        )
+      case 'platform':
+        return (
+          <AppShell>
+            <PlatformAdminView />
           </AppShell>
         )
       case 'settings':
