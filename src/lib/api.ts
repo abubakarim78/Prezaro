@@ -74,7 +74,11 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
     res = await fetch(path, {
       method,
       headers,
-      body: isFormData ? (body as FormData) : (body !== undefined ? JSON.stringify(body) : undefined),
+      body: isFormData
+        ? (body as FormData)
+        : (body !== undefined
+            ? (typeof body === 'string' ? body : JSON.stringify(body))
+            : undefined),
       credentials: 'same-origin',
       cache: 'no-store',
     })

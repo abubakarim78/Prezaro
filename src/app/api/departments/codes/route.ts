@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { BadRequestError, ForbiddenError, NotFoundError, handle, readJson, zodMessage } from '../../_lib/helpers'
 import type { AccessCode } from '@/lib/types'
+import { sendAppEmail, accessCodeInvitationHtml } from '@/lib/email'
 
 function generateAccessCode(deptCode: string, role: string): string {
   const prefix = deptCode ? `${deptCode.toUpperCase().slice(0, 4)}` : 'PREZ'
@@ -82,6 +83,7 @@ const createCodeSchema = z.object({
   expiresInDays: z.number().int().min(1).max(365).optional(),
   designatedEmail: z.string().email().optional().or(z.literal('')),
   designatedName: z.string().max(100).optional().or(z.literal('')),
+  sendEmailImmediately: z.boolean().optional(),
 })
 
 export async function POST(req: Request) {
@@ -104,7 +106,12 @@ export async function POST(req: Request) {
 
     const dept = await db.department.findUnique({
       where: { id: targetDeptId },
-      select: { id: true, code: true, name: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        institution: { select: { name: true } },
+      },
     })
     if (!dept) throw new NotFoundError('Department not found')
 
@@ -137,6 +144,31 @@ export async function POST(req: Request) {
         department: { select: { name: true, code: true } },
       },
     })
+
+    if (parsed.data.sendEmailImmediately && parsed.data.designatedEmail) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof req.headers.get === 'function' && req.headers.get('origin')) || 'https://prezaro.com'
+      const directLink = `${appUrl.replace(/\/+$/, '')}/?code=${accessCode.code}`
+      await sendAppEmail({
+        to: parsed.data.designatedEmail,
+        subject: `Prezaro Access Code: Join ${dept.name}`,
+        html: accessCodeInvitationHtml(
+          parsed.data.designatedName || null,
+          accessCode.code,
+          parsed.data.role,
+          dept.name,
+          dept.institution?.name || 'Prezaro Academic Portal',
+          expiresAt ? expiresAt.toISOString() : null,
+          directLink,
+        ),
+        type: 'ACCESS_CODE_INVITE',
+        meta: {
+          codeId: accessCode.id,
+          code: accessCode.code,
+          departmentId: dept.id,
+          sentBy: user.email,
+        },
+      })
+    }
 
     return NextResponse.json({
       code: {

@@ -139,6 +139,16 @@ export default function PlatformAdminView() {
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL')
   const [userInstFilter, setUserInstFilter] = useState<string>('ALL')
 
+  // Department management state
+  const [addDeptOpen, setAddDeptOpen] = useState(false)
+  const [deptSearch, setDeptSearch] = useState('')
+  const [deptInstFilter, setDeptInstFilter] = useState<string>('ALL')
+  const [newDeptData, setNewDeptData] = useState({
+    name: '',
+    code: '',
+    institutionId: '',
+  })
+
   // Institutions Filters & search
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED'>('ALL')
@@ -250,6 +260,61 @@ export default function PlatformAdminView() {
     })
   }, [platformUsers, userSearch, userRoleFilter, userInstFilter])
 
+  // Filtered departments
+  const filteredDepartments = useMemo(() => {
+    return departments.filter((d) => {
+      const matchInst = deptInstFilter === 'ALL' || d.institutionId === deptInstFilter
+      const q = deptSearch.trim().toLowerCase()
+      const matchQ =
+        !q ||
+        d.name.toLowerCase().includes(q) ||
+        d.code.toLowerCase().includes(q) ||
+        (d.institutionName && d.institutionName.toLowerCase().includes(q))
+      return matchInst && matchQ
+    })
+  }, [departments, deptSearch, deptInstFilter])
+
+  // Department actions
+  const handleCreateDepartment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newDeptData.name.trim() || !newDeptData.code.trim() || !newDeptData.institutionId) {
+      toast.error('Please enter department name, code, and assign an institution')
+      return
+    }
+    setSaving(true)
+    try {
+      await api('/api/departments', {
+        method: 'POST',
+        body: {
+          name: newDeptData.name.trim(),
+          code: newDeptData.code.trim().toUpperCase(),
+          institutionId: newDeptData.institutionId,
+        },
+      })
+      toast.success(`Department "${newDeptData.name}" created successfully`)
+      setAddDeptOpen(false)
+      setNewDeptData({ name: '', code: '', institutionId: '' })
+      loadData(true)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteDepartment = async (dept: Department) => {
+    if (!confirm(`Are you sure you want to delete department "${dept.name}" (${dept.code})? Any courses and student rosters linked to it will also be removed.`)) {
+      return
+    }
+    try {
+      await api(`/api/departments?id=${dept.id}`, { method: 'DELETE' })
+      toast.success(`Department "${dept.name}" deleted`)
+      loadData(true)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    }
+  }
+
   // Auto-generate slug from name
   const handleNameChange = (val: string) => {
     const slug = val
@@ -272,7 +337,7 @@ export default function PlatformAdminView() {
     try {
       await api('/api/platform/institutions', {
         method: 'POST',
-        body: JSON.stringify(formData),
+        body: formData,
       })
       toast.success(`Institution "${formData.name}" provisioned successfully`)
       setCreateOpen(false)
@@ -308,7 +373,7 @@ export default function PlatformAdminView() {
     try {
       await api(`/api/platform/institutions/${editTarget.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({
+        body: {
           name: editTarget.name,
           code: editTarget.code,
           plan: editTarget.plan,
@@ -324,7 +389,7 @@ export default function PlatformAdminView() {
           contactPhone: editTarget.contactPhone,
           primaryColor: editTarget.primaryColor,
           featuresJson: editTarget.featuresJson,
-        }),
+        },
       })
       toast.success(`Policies updated for ${editTarget.name} without code changes`)
       setEditTarget(null)
@@ -342,7 +407,7 @@ export default function PlatformAdminView() {
     try {
       await api(`/api/platform/institutions/${inst.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: nextStatus }),
+        body: { status: nextStatus },
       })
       toast.success(`${inst.name} is now ${nextStatus}`)
       loadData(true)
@@ -429,7 +494,7 @@ export default function PlatformAdminView() {
 
       await api(`/api/platform/users/${editUserTarget.id}`, {
         method: 'PATCH',
-        body: JSON.stringify(payload),
+        body: payload,
       })
       toast.success(`User ${editUserTarget.email} updated successfully`)
       setEditUserTarget(null)
@@ -533,18 +598,22 @@ export default function PlatformAdminView() {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="institutions" className="w-full">
-          <TabsList className="grid w-full max-w-lg grid-cols-3">
-            <TabsTrigger value="institutions" className="gap-2">
+          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
+            <TabsTrigger value="institutions" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
               <Building2 className="h-3.5 w-3.5" />
               Institutions ({institutions.length})
             </TabsTrigger>
-            <TabsTrigger value="users" className="gap-2">
+            <TabsTrigger value="departments" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
+              <GraduationCap className="h-3.5 w-3.5" />
+              Departments ({departments.length})
+            </TabsTrigger>
+            <TabsTrigger value="users" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
               <Users className="h-3.5 w-3.5" />
               Users ({platformUsers.length})
             </TabsTrigger>
-            <TabsTrigger value="policies" className="gap-2">
+            <TabsTrigger value="policies" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              Dynamic Policies
+              Policies
             </TabsTrigger>
           </TabsList>
 
@@ -720,7 +789,116 @@ export default function PlatformAdminView() {
             )}
           </TabsContent>
 
-          {/* TAB 2: Users Management across Platform */}
+          {/* TAB 2: Departments Management */}
+          <TabsContent value="departments" className="mt-4 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={deptSearch}
+                  onChange={(e) => setDeptSearch(e.target.value)}
+                  placeholder="Search department by name or code..."
+                  className="pl-9 h-9 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Select value={deptInstFilter} onValueChange={(v) => setDeptInstFilter(v)}>
+                  <SelectTrigger className="h-9 text-xs w-[160px]">
+                    <SelectValue placeholder="Institution" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Institutions</SelectItem>
+                    {institutions.map((i) => (
+                      <SelectItem key={i.id} value={i.id}>
+                        {i.code} - {i.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  onClick={() => setAddDeptOpen(true)}
+                  size="sm"
+                  className="gap-1.5 h-9 text-xs font-semibold shrink-0"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Create Department
+                </Button>
+              </div>
+            </div>
+
+            {filteredDepartments.length === 0 ? (
+              <EmptyState
+                icon={GraduationCap}
+                title="No departments found"
+                description={deptSearch ? 'Try a different search term or filter' : 'No departments exist yet. Create your first academic department.'}
+                action={
+                  <Button onClick={() => setAddDeptOpen(true)} size="sm" className="gap-1.5 mt-2">
+                    <Plus className="h-3.5 w-3.5" /> Create Department
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="rounded-2xl border bg-card overflow-hidden shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted/50 border-b text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3 px-4">Department</th>
+                        <th className="py-3 px-4">Institution</th>
+                        <th className="py-3 px-4">Metrics</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {filteredDepartments.map((d) => (
+                        <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-foreground">{d.name}</div>
+                            <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                              {d.code}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5 font-medium text-foreground">
+                              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>{d.institutionName || 'Unassigned'}</span>
+                            </div>
+                            {d.institutionCode && (
+                              <p className="text-[10px] text-muted-foreground font-mono">{d.institutionCode}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                              <span><strong className="text-foreground">{d.courseCount ?? 0}</strong> courses</span>
+                              <span>·</span>
+                              <span><strong className="text-foreground">{d.userCount ?? 0}</strong> staff</span>
+                              <span>·</span>
+                              <span><strong className="text-foreground">{d.studentCount ?? 0}</strong> students</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteDepartment(d)}
+                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                              title="Delete Department"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* TAB 3: Users Management across Platform */}
           <TabsContent value="users" className="mt-4 space-y-4">
             {/* User Filter Toolbar */}
             <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
@@ -944,6 +1122,84 @@ export default function PlatformAdminView() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* ---------- MODAL: Create Department ---------- */}
+      <Dialog open={addDeptOpen} onOpenChange={setAddDeptOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Department</DialogTitle>
+            <DialogDescription>
+              Add an academic department to an institution. Lecturers and courses can then be assigned to it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateDepartment} className="space-y-4 pt-2">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Department Name <span className="text-destructive">*</span></Label>
+                <Input
+                  value={newDeptData.name}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    const initials = name
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .map((w) => w[0])
+                      .join('')
+                      .toUpperCase()
+                      .slice(0, 6)
+                    setNewDeptData((p) => ({
+                      ...p,
+                      name,
+                      code: p.code ? p.code : initials,
+                    }))
+                  }}
+                  placeholder="e.g. Biomedical Sciences & Diagnostics"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Department Code / Acronym <span className="text-destructive">*</span></Label>
+                <Input
+                  value={newDeptData.code}
+                  onChange={(e) => setNewDeptData((p) => ({ ...p, code: e.target.value.toUpperCase() }))}
+                  placeholder="e.g. BMS"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Target Institution <span className="text-destructive">*</span></Label>
+                <Select
+                  value={newDeptData.institutionId}
+                  onValueChange={(v) => setNewDeptData((p) => ({ ...p, institutionId: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Institution" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {institutions.map((i) => (
+                      <SelectItem key={i.id} value={i.id}>
+                        {i.name} ({i.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setAddDeptOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Creating...' : 'Create Department'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* ---------- MODAL: Add User to Platform ---------- */}
       <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
@@ -1191,8 +1447,8 @@ export default function PlatformAdminView() {
           </DialogHeader>
 
           <form onSubmit={handleCreateInstitution} className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2 space-y-1">
                 <Label htmlFor="inst-name" className="text-xs">
                   Institution Name <span className="text-destructive">*</span>
                 </Label>
@@ -1294,7 +1550,7 @@ export default function PlatformAdminView() {
                 />
               </div>
 
-              <div className="col-span-2 space-y-1">
+              <div className="sm:col-span-2 space-y-1">
                 <Label htmlFor="inst-email" className="text-xs">
                   Contact / Administrative Email
                 </Label>
@@ -1333,7 +1589,7 @@ export default function PlatformAdminView() {
           {editTarget && (
             <div className="space-y-5 py-2 max-h-[70vh] overflow-y-auto pr-1">
               {/* Basic Info */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Institution Name</Label>
                   <Input
@@ -1355,7 +1611,7 @@ export default function PlatformAdminView() {
                 <h4 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider">
                   Subscription & Capacity Quotas
                 </h4>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs">Plan Tier</Label>
                     <Select

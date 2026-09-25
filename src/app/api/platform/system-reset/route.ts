@@ -65,17 +65,9 @@ export async function POST(req: Request) {
       },
     })
 
-    // 3. Create fresh departments
+    // 3. Create fresh admin department
     const deptGA = await db.department.create({
       data: { name: 'General Administration', code: 'GA', institutionId: institution.id },
-    })
-
-    const deptCS = await db.department.create({
-      data: { name: 'Computer Science', code: 'CS', institutionId: institution.id },
-    })
-
-    const deptPharm = await db.department.create({
-      data: { name: 'Pharmacognosy and Herbal Medicine', code: 'PAHM', institutionId: institution.id },
     })
 
     // 4. Create Superadmin user
@@ -101,7 +93,7 @@ export async function POST(req: Request) {
       data: {
         code: 'PREZ-HOD-UDS01',
         role: 'ADMIN',
-        departmentId: deptCS.id,
+        departmentId: deptGA.id,
         createdById: superadmin.id,
         maxUses: 5,
         usedCount: 0,

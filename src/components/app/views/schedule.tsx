@@ -743,7 +743,7 @@ export default function ScheduleView() {
 
             {/* Start and End Times with Flexible Inputs & Duration Presets */}
             <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-3 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
                 <div className="space-y-1.5 min-w-0">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-semibold">Start Time</Label>

@@ -117,31 +117,13 @@ async function main(): Promise<void> {
     console.log('[bootstrap] Created primary institution:', institution.name)
   }
 
-  // ---- 2. Ensure Core Departments exist ----
+  // ---- 2. Ensure Administration Department exists ----
   let deptGA = await db.department.findFirst({
     where: { name: 'General Administration', institutionId: institution.id },
   })
   if (!deptGA) {
     deptGA = await db.department.create({
       data: { name: 'General Administration', code: 'GA', institutionId: institution.id },
-    })
-  }
-
-  let deptCS = await db.department.findFirst({
-    where: { name: 'Computer Science', institutionId: institution.id },
-  })
-  if (!deptCS) {
-    deptCS = await db.department.create({
-      data: { name: 'Computer Science', code: 'CS', institutionId: institution.id },
-    })
-  }
-
-  let deptPharm = await db.department.findFirst({
-    where: { name: 'Pharmacognosy and Herbal Medicine', institutionId: institution.id },
-  })
-  if (!deptPharm) {
-    deptPharm = await db.department.create({
-      data: { name: 'Pharmacognosy and Herbal Medicine', code: 'PAHM', institutionId: institution.id },
     })
   }
 
@@ -192,7 +174,7 @@ async function main(): Promise<void> {
         data: {
           code: 'PREZ-HOD-UDS01',
           role: 'ADMIN',
-          departmentId: deptCS.id,
+          departmentId: deptGA.id,
           createdById: adminUser.id,
           maxUses: 5,
           usedCount: 0,

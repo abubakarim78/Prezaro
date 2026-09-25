@@ -27,6 +27,7 @@ import {
   KeyRound,
   Link as LinkIcon,
   Loader2,
+  Mail,
   Plus,
   QrCode,
   RotateCcw,
@@ -52,6 +53,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
@@ -108,6 +110,8 @@ export default function AdminView() {
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [shareLinkOpen, setShareLinkOpen] = useState(false)
   const [selectedShareCourseId, setSelectedShareCourseId] = useState<string>('all')
+  const [codeSendEmailImmediately, setCodeSendEmailImmediately] = useState(true)
+  const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
   // Load department report
   useEffect(() => {
@@ -165,9 +169,14 @@ export default function AdminView() {
           expiresInDays: codeExpiryDays === 0 ? undefined : codeExpiryDays,
           designatedName: codeDesignatedName.trim() || undefined,
           designatedEmail: codeDesignatedEmail.trim() || undefined,
+          sendEmailImmediately: codeSendEmailImmediately && Boolean(codeDesignatedEmail.trim()),
         },
       })
-      toast.success(`Access code ${res.code.code} generated successfully`)
+      if (codeSendEmailImmediately && codeDesignatedEmail.trim()) {
+        toast.success(`Access code ${res.code.code} generated and invitation emailed to ${codeDesignatedEmail}!`)
+      } else {
+        toast.success(`Access code ${res.code.code} generated successfully`)
+      }
       setCreateCodeOpen(false)
       setCodeDesignatedName('')
       setCodeDesignatedEmail('')
@@ -176,6 +185,36 @@ export default function AdminView() {
       toast.error(getErrorMessage(e))
     } finally {
       setGeneratingCode(false)
+    }
+  }
+
+  // Send code email action
+  const handleSendCodeEmail = async (code: AccessCode) => {
+    let email = code.designatedEmail
+    if (!email) {
+      const prompted = window.prompt(`Enter recipient email for access code ${code.code}:`)
+      if (!prompted || !prompted.trim()) return
+      email = prompted.trim()
+    }
+    setSendingEmailCodeId(code.id)
+    try {
+      const res = await api<{ ok: boolean; deliveredStatus: string; error?: string }>(
+        `/api/departments/codes/${code.id}/email`,
+        {
+          method: 'POST',
+          body: { recipientEmail: email, recipientName: code.designatedName || undefined },
+        }
+      )
+      if (res.deliveredStatus === 'SENT') {
+        toast.success(`Access code sent to ${email} via Resend!`)
+      } else {
+        toast.info(`Invitation recorded for ${email} (${res.deliveredStatus})`)
+      }
+      void loadCodes()
+    } catch (e) {
+      toast.error('Failed to send email: ' + getErrorMessage(e))
+    } finally {
+      setSendingEmailCodeId(null)
     }
   }
 
@@ -649,6 +688,21 @@ export default function AdminView() {
                               Link
                             </Button>
                             <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-9 gap-1.5 text-xs font-semibold"
+                              disabled={sendingEmailCodeId === c.id}
+                              onClick={() => handleSendCodeEmail(c)}
+                              title={c.designatedEmail ? `Email access code directly to ${c.designatedEmail}` : 'Send access code to lecturer via email'}
+                            >
+                              {sendingEmailCodeId === c.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Mail className="h-3.5 w-3.5 text-primary" />
+                              )}
+                              Send Email
+                            </Button>
+                            <Button
                               variant="ghost"
                               size="icon"
                               className="h-9 w-9 text-destructive hover:bg-destructive/10"
@@ -882,7 +936,7 @@ export default function AdminView() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-foreground">Max Uses</label>
                 <Select value={String(codeMaxUses)} onValueChange={(v) => setCodeMaxUses(Number(v))}>
@@ -936,6 +990,24 @@ export default function AdminView() {
                 onChange={(e) => setCodeDesignatedEmail(e.target.value)}
               />
             </div>
+
+            {codeDesignatedEmail.trim() && (
+              <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-3">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Mail className="h-3.5 w-3.5 text-primary" />
+                    Dispatch Invitation Email
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Send join link &amp; code directly to {codeDesignatedEmail}
+                  </p>
+                </div>
+                <Switch
+                  checked={codeSendEmailImmediately}
+                  onCheckedChange={setCodeSendEmailImmediately}
+                />
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
@@ -1021,15 +1093,15 @@ export default function AdminView() {
                   </Badge>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Input
                   readOnly
                   value={getPublicEnrollUrl()}
-                  className="font-mono text-xs bg-background"
+                  className="font-mono text-xs bg-background min-w-0 flex-1 truncate"
                 />
                 <Button
                   size="sm"
-                  className="shrink-0 gap-1.5 font-semibold"
+                  className="shrink-0 gap-1.5 font-semibold w-full sm:w-auto"
                   onClick={() => copyText(getPublicEnrollUrl(), selectedShareCourseId === 'all' ? 'Department Enrollment Link' : 'Course Enrollment Link')}
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy Link

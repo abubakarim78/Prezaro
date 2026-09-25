@@ -54,6 +54,20 @@ export interface Institution {
   departmentCount?: number
 }
 
+export interface Department {
+  id: string
+  name: string
+  code: string
+  institutionId?: string | null
+  institutionName?: string | null
+  institutionCode?: string | null
+  courseCount?: number
+  userCount?: number
+  studentCount?: number
+  codeCount?: number
+  createdAt?: string
+}
+
 export interface User {
   id: string
   email: string

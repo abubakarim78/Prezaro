@@ -21,6 +21,7 @@ export type EmailType =
   | 'COURSE_ENROLLMENT'
   | 'CLASS_REMINDER'
   | 'CLASS_RESCHEDULED'
+  | 'ACCESS_CODE_INVITE'
   | 'TEST'
 
 export interface EmailConfigStatus {
@@ -322,6 +323,40 @@ export function classRescheduledHtml(
       `) +
       row('Please take note of the updated schedule. Your attendance will be marked at the new time.'),
     'Prezaro timetable notification.',
+  )
+}
+
+export function accessCodeInvitationHtml(
+  name: string | null,
+  code: string,
+  role: string,
+  departmentName: string,
+  institutionName: string,
+  expiresAt: string | null,
+  directLink: string,
+): string {
+  const roleLabel = role === 'ADMIN' ? 'Department Administrator / Head of Department' : 'Lecturer'
+  const greeting = name ? `Dear ${escapeHtml(name)},` : 'Hello,'
+  return layout(
+    `Prezaro Invitation: Access Code for ${escapeHtml(departmentName)}`,
+    row(`${greeting}<br/><br/>You have been invited to join <strong>${escapeHtml(institutionName)}</strong> (${escapeHtml(departmentName)}) on ${BRAND.name} as a <strong>${escapeHtml(roleLabel)}</strong>.`) +
+      highlight(`
+        <div style="font-size:12px;color:${BRAND.muted};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Your Designated Access Code</div>
+        <div style="font-size:24px;font-weight:800;letter-spacing:0.12em;font-family:monospace;color:${BRAND.text};margin-bottom:8px;">${escapeHtml(code)}</div>
+        <div style="font-size:13px;color:${BRAND.muted};line-height:1.6;">
+          <strong>Designated Role:</strong> ${escapeHtml(roleLabel)}<br/>
+          <strong>Department:</strong> ${escapeHtml(departmentName)}<br/>
+          ${expiresAt ? `<strong>Valid Until:</strong> ${new Date(expiresAt).toLocaleDateString()}` : '<strong>Validity:</strong> No expiration date'}
+        </div>
+      `) +
+      row(`
+        <div style="text-align:center;padding:16px 0;">
+          <a href="${directLink}" style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 28px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Activate Account & Join Department &rarr;</a>
+        </div>
+      `) +
+      row(`Alternatively, open <a href="${directLink}" style="color:#059669;word-break:break-all;">${directLink}</a> and select <strong>Join with Access Code</strong>.`) +
+      row('Once joined, your teaching roster and attendance sessions will be loaded automatically into your account.'),
+    'Prezaro Secure Department Access Invitation.',
   )
 }
 
