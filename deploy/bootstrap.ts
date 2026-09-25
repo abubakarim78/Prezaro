@@ -64,52 +64,144 @@ async function main(): Promise<void> {
     }
   }
 
-  // ---- One-time admin bootstrap ----
-  const email = (process.env.BOOTSTRAP_EMAIL?.trim().toLowerCase() || 'abubakarima1969@uds.edu.gh')
-  const password = process.env.BOOTSTRAP_PASSWORD
-  const name = process.env.BOOTSTRAP_NAME?.trim() || 'Prezaro Administrator'
-  const departmentName = process.env.BOOTSTRAP_DEPARTMENT?.trim() || 'General Administration'
+  // ---- Database reset guard for live production ----
+  const shouldReset =
+    process.env.RESET_DATABASE === 'true' ||
+    process.env.CLEAR_DB === 'true' ||
+    process.env.BOOTSTRAP_RESET === 'true'
 
-  if (!password) {
-    console.log('[bootstrap] BOOTSTRAP_PASSWORD not set — skipping admin bootstrap.')
-    return
+  if (shouldReset) {
+    console.log('[bootstrap] RESET_DATABASE requested — wiping all tables for fresh start...')
+    await db.attendanceRecord.deleteMany({})
+    await db.session.deleteMany({})
+    await db.enrollment.deleteMany({})
+    await db.classSchedule.deleteMany({})
+    await db.course.deleteMany({})
+    await db.enrollmentSubmission.deleteMany({})
+    await db.accessCode.deleteMany({})
+    await db.student.deleteMany({})
+    await db.user.deleteMany({})
+    await db.department.deleteMany({})
+    await db.institution.deleteMany({})
+    console.log('[bootstrap] Tables wiped successfully.')
   }
 
-  // Check if admin user already exists
-  const existingUser = await db.user.findUnique({
-    where: { email },
+  // ---- 1. Ensure Primary Institution exists ----
+  let institution = await db.institution.findFirst({
+    where: { slug: 'uds' },
   })
-
-  if (existingUser) {
-    console.log(`[bootstrap] admin user (${email}) already exists — skipping creation.`)
-    return
-  }
-
-  let departmentId: string | null = null
-  if (departmentName) {
-    let dept = await db.department.findFirst({
-      where: { name: departmentName },
+  if (!institution) {
+    institution = await db.institution.create({
+      data: {
+        name: 'University for Development Studies',
+        code: 'UDS',
+        slug: 'uds',
+        plan: 'CAMPUS_ANNUAL',
+        status: 'ACTIVE',
+        maxStudents: 10000,
+        maxCourses: 300,
+        allowedModes: 'ALL',
+        confidenceThreshold: 0.48,
+        lateGraceMinutes: 15,
+        termSystem: 'TRIMESTER',
+        atRiskThreshold: 75,
+        contactEmail: 'abubakarima1969@uds.edu.gh',
+        featuresJson: JSON.stringify({
+          allowOffline: true,
+          requireConsent: true,
+          notifyEmail: true,
+          notifyPush: true,
+        }),
+      },
     })
-    if (!dept) {
-      dept = await db.department.create({
-        data: { name: departmentName, code: deptCode(departmentName) },
-      })
-    }
-    departmentId = dept.id
+    console.log('[bootstrap] Created primary institution:', institution.name)
   }
+
+  // ---- 2. Ensure Core Departments exist ----
+  let deptGA = await db.department.findFirst({
+    where: { name: 'General Administration', institutionId: institution.id },
+  })
+  if (!deptGA) {
+    deptGA = await db.department.create({
+      data: { name: 'General Administration', code: 'GA', institutionId: institution.id },
+    })
+  }
+
+  let deptCS = await db.department.findFirst({
+    where: { name: 'Computer Science', institutionId: institution.id },
+  })
+  if (!deptCS) {
+    deptCS = await db.department.create({
+      data: { name: 'Computer Science', code: 'CS', institutionId: institution.id },
+    })
+  }
+
+  let deptPharm = await db.department.findFirst({
+    where: { name: 'Pharmacognosy and Herbal Medicine', institutionId: institution.id },
+  })
+  if (!deptPharm) {
+    deptPharm = await db.department.create({
+      data: { name: 'Pharmacognosy and Herbal Medicine', code: 'PAHM', institutionId: institution.id },
+    })
+  }
+
+  // ---- 3. Ensure Superadmin User exists and is properly configured ----
+  const email = (process.env.BOOTSTRAP_EMAIL?.trim().toLowerCase() || 'abubakarima1969@uds.edu.gh')
+  const password = process.env.BOOTSTRAP_PASSWORD?.trim() || 'ChangeMe2026!'
+  const name = process.env.BOOTSTRAP_NAME?.trim() || 'Alhassan Abubakari'
 
   const passwordHash = await hash(password, 10)
-  await db.user.create({
-    data: {
-      email,
-      passwordHash,
-      name,
-      role: 'ADMIN',
-      onboarded: true,
-      departmentId,
-    },
+  const existingUser = await db.user.findUnique({ where: { email } })
+
+  if (existingUser) {
+    await db.user.update({
+      where: { id: existingUser.id },
+      data: {
+        role: 'SUPERADMIN',
+        onboarded: true,
+        institutionId: institution.id,
+        departmentId: existingUser.departmentId || deptGA.id,
+        passwordHash,
+      },
+    })
+    console.log(`[bootstrap] Superadmin user (${email}) updated to role SUPERADMIN with active credentials.`)
+  } else {
+    await db.user.create({
+      data: {
+        email,
+        passwordHash,
+        name,
+        title: 'Institutional Head',
+        role: 'SUPERADMIN',
+        onboarded: true,
+        institutionId: institution.id,
+        departmentId: deptGA.id,
+      },
+    })
+    console.log(`[bootstrap] Successfully created Superadmin user: ${email} (Role: SUPERADMIN)`)
+  }
+
+  // ---- 4. Ensure initial starter HOD access code exists for Computer Science ----
+  const existingHodCode = await db.accessCode.findFirst({
+    where: { code: 'PREZ-HOD-UDS01' },
   })
-  console.log(`[bootstrap] successfully created admin user: ${email}`)
+  if (!existingHodCode) {
+    const adminUser = await db.user.findUnique({ where: { email } })
+    if (adminUser) {
+      await db.accessCode.create({
+        data: {
+          code: 'PREZ-HOD-UDS01',
+          role: 'ADMIN',
+          departmentId: deptCS.id,
+          createdById: adminUser.id,
+          maxUses: 5,
+          usedCount: 0,
+          status: 'ACTIVE',
+        },
+      })
+      console.log('[bootstrap] Created initial Department Head access code: PREZ-HOD-UDS01')
+    }
+  }
 }
 
 main()
