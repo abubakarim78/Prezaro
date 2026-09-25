@@ -80,10 +80,22 @@ const POSES: { label: string; hint: string; ok: (off: number) => boolean }[] = [
 
 type Step = 'details' | 'consent' | 'capture' | 'success'
 
+interface TargetCourse {
+  id: string
+  code: string
+  title: string
+  level: number
+  departmentId: string
+  departmentName?: string
+  departmentCode?: string
+  institutionName?: string
+}
+
 export default function StudentEnrollPage() {
   const [step, setStep] = useState<Step>('details')
   const [departments, setDepartments] = useState<DepartmentItem[]>([])
   const [loadingDepts, setLoadingDepts] = useState(true)
+  const [targetCourse, setTargetCourse] = useState<TargetCourse | null>(null)
 
   // Form Fields
   const [selectedDeptId, setSelectedDeptId] = useState('')
@@ -117,18 +129,34 @@ export default function StudentEnrollPage() {
   const holdStartRef = useRef<number | null>(null)
   const faceApiRef = useRef<FaceApi | null>(null)
 
-  // Fetch departments & courses
+  // Fetch departments & courses (supporting direct course lookup)
   useEffect(() => {
     ;(async () => {
       try {
-        const res = await fetch('/api/departments/public')
+        const urlParams = new URLSearchParams(window.location.search)
+        const courseParam = urlParams.get('course') || urlParams.get('courseId') || urlParams.get('courseCode')
+        const deptParam = urlParams.get('dept') || urlParams.get('deptId')
+
+        const queryParams = new URLSearchParams()
+        if (courseParam) queryParams.set('course', courseParam)
+        if (deptParam) queryParams.set('dept', deptParam)
+
+        const fetchUrl = `/api/departments/public${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+        const res = await fetch(fetchUrl)
         const data = await res.json()
+
         if (data.departments && data.departments.length > 0) {
           setDepartments(data.departments)
-          const urlParams = new URLSearchParams(window.location.search)
-          const deptQuery = urlParams.get('dept') || urlParams.get('deptId')
+        }
+
+        if (data.targetCourse) {
+          setTargetCourse(data.targetCourse)
+          setSelectedDeptId(data.targetCourse.departmentId)
+          setSelectedCourseIds([data.targetCourse.id])
+          if (data.targetCourse.level) setLevel(data.targetCourse.level)
+        } else if (data.departments && data.departments.length > 0) {
           const found = data.departments.find(
-            (d: DepartmentItem) => d.id === deptQuery || d.code.toLowerCase() === deptQuery?.toLowerCase()
+            (d: DepartmentItem) => d.id === deptParam || d.code.toLowerCase() === deptParam?.toLowerCase()
           )
           if (found) {
             setSelectedDeptId(found.id)
@@ -434,6 +462,32 @@ export default function StudentEnrollPage() {
                 </p>
               </div>
 
+              {/* Target Course Banner when enrolling via specific course link */}
+              {targetCourse && (
+                <div className="rounded-2xl border-2 border-primary/30 bg-primary/10 p-4 space-y-2 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <Badge className="bg-primary text-primary-foreground font-mono text-xs px-2.5 py-0.5 font-bold">
+                      {targetCourse.code}
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground font-semibold">
+                      {targetCourse.institutionName}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">
+                      {targetCourse.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Department of <strong>{targetCourse.departmentName}</strong>
+                    </p>
+                  </div>
+                  <div className="pt-2 border-t border-primary/20 flex items-center gap-1.5 text-xs text-primary font-medium">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    You are enrolling directly into this course roster upon department verification.
+                  </div>
+                </div>
+              )}
+
               {loadingDepts ? (
                 <div className="py-12 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -443,16 +497,24 @@ export default function StudentEnrollPage() {
                 <div className="space-y-4">
                   {/* Department selection */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                      Department
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                        Department
+                      </label>
+                      {targetCourse && (
+                        <span className="text-[11px] text-primary font-medium">
+                          Locked to course department
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={selectedDeptId}
+                      disabled={!!targetCourse}
                       onChange={(e) => {
                         setSelectedDeptId(e.target.value)
                         setSelectedCourseIds([])
                       }}
-                      className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-80"
                     >
                       {departments.map((d) => (
                         <option key={d.id} value={d.id}>

@@ -86,6 +86,23 @@ export async function GET(req: Request) {
       take: 200,
     })
 
+    const allCourseIds = new Set<string>()
+    for (const s of raw) {
+      try {
+        const ids = JSON.parse(s.courseIdsJson || '[]')
+        for (const id of ids) allCourseIds.add(id)
+      } catch {}
+    }
+
+    const coursesMap = new Map<string, { id: string; code: string; title: string }>()
+    if (allCourseIds.size > 0) {
+      const courses = await db.course.findMany({
+        where: { id: { in: Array.from(allCourseIds) } },
+        select: { id: true, code: true, title: true },
+      })
+      for (const c of courses) coursesMap.set(c.id, c)
+    }
+
     const submissions: EnrollmentSubmission[] = raw.map((s) => {
       let courseIds: string[] = []
       let descriptorsCount = 0
@@ -95,6 +112,10 @@ export async function GET(req: Request) {
       try {
         descriptorsCount = JSON.parse(s.descriptorsJson || '[]').length
       } catch {}
+
+      const resolvedCourses = courseIds
+        .map((cid) => coursesMap.get(cid))
+        .filter((c): c is { id: string; code: string; title: string } => !!c)
 
       return {
         id: s.id,
@@ -107,6 +128,7 @@ export async function GET(req: Request) {
         departmentId: s.departmentId,
         departmentName: s.department.name,
         courseIds,
+        courses: resolvedCourses,
         photoData: s.photoData,
         descriptorsCount,
         consentGiven: s.consentGiven,

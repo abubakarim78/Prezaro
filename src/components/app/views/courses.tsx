@@ -11,6 +11,7 @@ import {
   BookPlus,
   ChevronDown,
   GraduationCap,
+  Link2,
   Loader2,
   Pencil,
   Users,
@@ -100,6 +101,15 @@ export default function CoursesView() {
     )
     setEditing(null)
     toast.success(`${course.code} updated`)
+  }
+
+  const copyEnrollLink = (course: Course) => {
+    if (typeof window === 'undefined') return
+    const url = `${window.location.origin}/enroll?course=${course.id}`
+    void navigator.clipboard.writeText(url)
+    toast.success(`Student enrollment link for ${course.code} copied!`, {
+      description: 'Share this link with your students to enroll for this course.',
+    })
   }
 
   return (
@@ -194,6 +204,16 @@ export default function CoursesView() {
                     </span>
                   </p>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 shrink-0 text-muted-foreground hover:text-primary"
+                  onClick={() => copyEnrollLink(c)}
+                  aria-label={`Copy student enrollment link for ${c.code}`}
+                  title="Copy student self-enrollment link for this course"
+                >
+                  <Link2 className="h-4 w-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

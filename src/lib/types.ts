@@ -415,6 +415,7 @@ export interface EnrollmentSubmission {
   departmentId: string
   departmentName?: string
   courseIds: string[]
+  courses?: { id: string; code: string; title: string }[]
   photoData?: string | null
   descriptorsCount: number
   consentGiven: boolean

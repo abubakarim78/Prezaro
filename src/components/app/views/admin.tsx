@@ -107,6 +107,7 @@ export default function AdminView() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [shareLinkOpen, setShareLinkOpen] = useState(false)
+  const [selectedShareCourseId, setSelectedShareCourseId] = useState<string>('all')
 
   // Load department report
   useEffect(() => {
@@ -264,7 +265,12 @@ export default function AdminView() {
 
   const getPublicEnrollUrl = () => {
     if (typeof window === 'undefined') return '/enroll'
-    return `${window.location.origin}/enroll`
+    const base = `${window.location.origin}/enroll`
+    if (selectedShareCourseId && selectedShareCourseId !== 'all') {
+      return `${base}?course=${selectedShareCourseId}`
+    }
+    const deptId = user?.departmentId
+    return deptId ? `${base}?dept=${deptId}` : base
   }
 
   return (
@@ -781,18 +787,33 @@ export default function AdminView() {
                             {sub.email} • Level {sub.level} • {sub.descriptorsCount || 3} Poses Verified
                           </p>
 
-                          {sub.courseIds && sub.courseIds.length > 0 && (
+                          {sub.courses && sub.courses.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {sub.courses.map((c) => (
+                                <span
+                                  key={c.id}
+                                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary"
+                                >
+                                  <BookOpen className="h-3 w-3" />
+                                  {c.code}
+                                  <span className="font-sans font-normal text-muted-foreground truncate max-w-[130px]">
+                                    · {c.title}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : sub.courseIds && sub.courseIds.length > 0 ? (
                             <div className="flex flex-wrap gap-1 pt-1">
                               {sub.courseIds.map((cId) => (
                                 <span
                                   key={cId}
                                   className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
                                 >
-                                  Course
+                                  {cId.slice(-6).toUpperCase()}
                                 </span>
                               ))}
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
 
@@ -966,8 +987,40 @@ export default function AdminView() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Target Enrollment Scope (Course or Entire Department)
+              </label>
+              <Select value={selectedShareCourseId} onValueChange={setSelectedShareCourseId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    Department-Wide Link (Students select courses)
+                  </SelectItem>
+                  {report?.courses.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      Course: {c.code} — {c.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="rounded-xl border bg-muted/40 p-3 space-y-2">
-              <p className="text-xs font-semibold text-foreground">Self-Enrollment Web Portal URL</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-foreground">
+                  {selectedShareCourseId === 'all'
+                    ? 'Department-Wide Enrollment Link'
+                    : 'Specific Course Direct Enrollment Link'}
+                </p>
+                {selectedShareCourseId !== 'all' && (
+                  <Badge variant="outline" className="text-[10px] font-mono border-primary/30 text-primary">
+                    Auto-enrolled on approval
+                  </Badge>
+                )}
+              </div>
               <div className="flex gap-2">
                 <Input
                   readOnly
@@ -977,9 +1030,9 @@ export default function AdminView() {
                 <Button
                   size="sm"
                   className="shrink-0 gap-1.5 font-semibold"
-                  onClick={() => copyText(getPublicEnrollUrl(), 'Enrollment Link')}
+                  onClick={() => copyText(getPublicEnrollUrl(), selectedShareCourseId === 'all' ? 'Department Enrollment Link' : 'Course Enrollment Link')}
                 >
-                  <Copy className="h-3.5 w-3.5" /> Copy
+                  <Copy className="h-3.5 w-3.5" /> Copy Link
                 </Button>
               </div>
             </div>
