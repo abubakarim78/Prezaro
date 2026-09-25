@@ -8,6 +8,23 @@ export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
 export type TermSystem = 'SEMESTER' | 'TRIMESTER' | 'QUARTER'
+export type AttendanceMethod = 'FACE' | 'MANUAL' | 'ONLINE'
+export type AttendanceJustification =
+  | 'CONSENT_OPT_OUT'
+  | 'MEDICAL_EXCUSE'
+  | 'CAMERA_ISSUE'
+  | 'LATE_PERMISSION'
+  | 'OFFICIAL_DUTY'
+  | 'OTHER'
+
+export const JUSTIFICATION_LABELS: Record<AttendanceJustification, string> = {
+  CONSENT_OPT_OUT: 'Privacy / Face capture opt-out',
+  MEDICAL_EXCUSE: 'Medical / Health clinic note',
+  CAMERA_ISSUE: 'Camera glare / Lighting occlusion',
+  LATE_PERMISSION: 'Permitted late arrival',
+  OFFICIAL_DUTY: 'University / Faculty assignment',
+  OTHER: 'Other manual review',
+}
 
 export interface Institution {
   id: string
@@ -141,6 +158,9 @@ export interface AttendanceRecord {
   code?: string
   name?: string
   status: AttendanceStatus
+  method?: AttendanceMethod
+  justification?: AttendanceJustification | null
+  note?: string | null
   confidence?: number | null
   markedAt: string
 }
@@ -365,5 +385,42 @@ export interface InstitutionInput {
   contactPhone?: string
   primaryColor?: string
   featuresJson?: string
+}
+
+export interface AccessCode {
+  id: string
+  code: string
+  role: 'LECTURER' | 'ADMIN'
+  departmentId: string
+  departmentName?: string
+  maxUses: number
+  usedCount: number
+  status: 'ACTIVE' | 'EXHAUSTED' | 'REVOKED' | 'EXPIRED'
+  expiresAt?: string | null
+  designatedEmail?: string | null
+  designatedName?: string | null
+  createdByName?: string
+  claimedUsers?: { id: string; name: string; email: string; createdAt: string }[]
+  createdAt: string
+}
+
+export interface EnrollmentSubmission {
+  id: string
+  studentId: string
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string | null
+  level: number
+  departmentId: string
+  departmentName?: string
+  courseIds: string[]
+  photoData?: string | null
+  descriptorsCount: number
+  consentGiven: boolean
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  rejectionReason?: string | null
+  createdAt: string
+  reviewedAt?: string | null
 }
 

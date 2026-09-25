@@ -31,22 +31,32 @@ export async function GET(
     const sessionIds = completed.map((s) => s.id)
     const records = await db.attendanceRecord.findMany({
       where: { sessionId: { in: sessionIds } },
-      select: { studentId: true, status: true },
+      select: { studentId: true, status: true, method: true, justification: true },
     })
 
-    const counts = new Map<string, { present: number; late: number }>()
+    const counts = new Map<string, { present: number; late: number; face: number; manual: number; excused: number }>()
     for (const r of records) {
-      if (r.status !== 'PRESENT' && r.status !== 'LATE') continue
-      const c = counts.get(r.studentId) ?? { present: 0, late: 0 }
+      if (r.status !== 'PRESENT' && r.status !== 'LATE') {
+        if (r.justification) {
+          const c = counts.get(r.studentId) ?? { present: 0, late: 0, face: 0, manual: 0, excused: 0 }
+          c.excused++
+          counts.set(r.studentId, c)
+        }
+        continue
+      }
+      const c = counts.get(r.studentId) ?? { present: 0, late: 0, face: 0, manual: 0, excused: 0 }
       if (r.status === 'PRESENT') c.present++
       else c.late++
+      if (r.method === 'FACE') c.face++
+      else c.manual++
+      if (r.justification) c.excused++
       counts.set(r.studentId, c)
     }
 
-    const lines = ['StudentID,Name,Level,Sessions,Present,Late,Percent']
+    const lines = ['StudentID,Name,Level,TotalSessions,Present,Late,FaceVerified,ManualAudited,Excused,Percent']
     const rows = enrollments
       .map(({ student }) => {
-        const c = counts.get(student.id) ?? { present: 0, late: 0 }
+        const c = counts.get(student.id) ?? { present: 0, late: 0, face: 0, manual: 0, excused: 0 }
         const percent =
           sessionIds.length > 0
             ? Math.round(((c.present + c.late) / sessionIds.length) * 100)
@@ -59,6 +69,9 @@ export async function GET(
             String(sessionIds.length),
             String(c.present),
             String(c.late),
+            String(c.face),
+            String(c.manual),
+            String(c.excused),
             `${percent}%`,
           ]
             .map(csvCell)

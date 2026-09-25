@@ -21,13 +21,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       orderBy: { markedAt: 'asc' },
     })
 
-    const lines = ['StudentID,Name,Status,MarkedAt']
+    const lines = ['StudentID,Name,Status,Method,Justification,Comments,Confidence,MarkedAt']
     for (const r of records) {
       lines.push(
         [
           r.student.studentId,
           `${r.student.firstName} ${r.student.lastName}`,
           r.status,
+          r.method || 'FACE',
+          r.justification || '',
+          r.note || '',
+          r.confidence != null ? `${Math.round(r.confidence * 100)}%` : '',
           r.markedAt.toISOString(),
         ]
           .map(csvCell)

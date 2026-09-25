@@ -235,6 +235,9 @@ export function attendanceRecordDTO(r: RecordWithStudent): AttendanceRecordDTO {
     code: r.student.studentId,
     name: `${r.student.firstName} ${r.student.lastName}`,
     status: r.status as AttendanceRecordDTO['status'],
+    method: (r.method as AttendanceRecordDTO['method']) ?? 'FACE',
+    justification: (r.justification as AttendanceRecordDTO['justification']) ?? null,
+    note: r.note ?? null,
     confidence: r.confidence ?? null,
     markedAt: r.markedAt.toISOString(),
   }
@@ -258,16 +261,26 @@ export async function loadSessionDetail(sessionId: string): Promise<SessionDetai
 
 /** WHERE clause limiting courses to what the user may see. */
 export function courseScopeWhere(user: AuthUser): Prisma.CourseWhereInput {
-  return user.role === 'ADMIN'
-    ? { departmentId: user.departmentId ?? '__none__' }
-    : { lecturerId: user.id }
+  if (user.role === 'SUPERADMIN') return {}
+  if (!user.departmentId) return { lecturerId: user.id }
+  return {
+    OR: [
+      { lecturerId: user.id },
+      { departmentId: user.departmentId },
+    ],
+  }
 }
 
 /** WHERE clause limiting sessions to what the user may see. */
 export function sessionScopeWhere(user: AuthUser): Prisma.SessionWhereInput {
-  return user.role === 'ADMIN'
-    ? { course: { departmentId: user.departmentId ?? '__none__' } }
-    : { lecturerId: user.id }
+  if (user.role === 'SUPERADMIN') return {}
+  if (!user.departmentId) return { lecturerId: user.id }
+  return {
+    OR: [
+      { lecturerId: user.id },
+      { course: { departmentId: user.departmentId } },
+    ],
+  }
 }
 
 export function serializeSchedule(s: any): ClassSchedule {
@@ -297,19 +310,19 @@ export function studentScopeWhere(user: AuthUser): Prisma.StudentWhereInput {
   return { departmentId: user.departmentId }
 }
 
-/** Fetch a course the user can act on (LECTURER: owner; ADMIN: same dept). */
+/** Fetch a course the user can act on (LECTURER: owner or same dept; ADMIN: same dept). */
 export async function requireCourse(user: AuthUser, courseId: string): Promise<Course> {
   const course = await db.course.findUnique({ where: { id: courseId } })
   if (!course) throw new NotFoundError('Course not found')
   const allowed =
-    user.role === 'ADMIN'
-      ? course.departmentId === user.departmentId
-      : course.lecturerId === user.id
+    user.role === 'SUPERADMIN' ||
+    (user.departmentId && course.departmentId === user.departmentId) ||
+    course.lecturerId === user.id
   if (!allowed) throw new ForbiddenError('You do not have access to this course')
   return course
 }
 
-/** Fetch a session the user can act on (LECTURER: owner; ADMIN: same dept as course). */
+/** Fetch a session the user can act on (LECTURER: owner or same dept; ADMIN: same dept as course). */
 export async function requireSession(
   user: AuthUser,
   sessionId: string,
@@ -320,9 +333,9 @@ export async function requireSession(
   })
   if (!session) throw new NotFoundError('Session not found')
   const allowed =
-    user.role === 'ADMIN'
-      ? session.course.departmentId === user.departmentId
-      : session.lecturerId === user.id
+    user.role === 'SUPERADMIN' ||
+    session.lecturerId === user.id ||
+    (user.departmentId && session.course.departmentId === user.departmentId)
   if (!allowed) throw new ForbiddenError('You do not have access to this session')
   return session
 }

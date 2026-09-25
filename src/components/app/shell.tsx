@@ -157,7 +157,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             >
               <ShieldCheck className="h-[18px] w-[18px]" />
-              Department
+              Department Admin
             </button>
           )}
           {user.role === 'SUPERADMIN' && (
@@ -214,6 +214,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <DropdownMenuItem onClick={() => navigate('settings')}>
                   <Settings className="h-4 w-4" /> Settings
                 </DropdownMenuItem>
+                {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
+                  <DropdownMenuItem onClick={() => navigate('admin')}>
+                    <ShieldCheck className="h-4 w-4" /> Department Admin
+                  </DropdownMenuItem>
+                )}
                 {user.role === 'SUPERADMIN' && (
                   <DropdownMenuItem onClick={() => navigate('platform')}>
                     <Globe2 className="h-4 w-4" /> Platform Admin

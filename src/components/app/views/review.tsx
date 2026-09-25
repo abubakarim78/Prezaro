@@ -15,11 +15,33 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  FileText,
   Loader2,
+  MessageSquare,
   Search,
+  ShieldAlert,
   Trash2,
   X,
 } from 'lucide-react'
+import type { AttendanceJustification, AttendanceMethod } from '@/lib/types'
+import { JUSTIFICATION_LABELS } from '@/lib/types'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
@@ -42,6 +64,9 @@ interface Row {
   code: string // index number
   name: string
   status: RowStatus
+  method?: AttendanceMethod
+  justification?: AttendanceJustification | null
+  note?: string | null
   confidence?: number | null
   markedAt: string
 }
@@ -58,6 +83,9 @@ export default function ReviewView() {
   const [submitting, setSubmitting] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [rosterMissing, setRosterMissing] = useState(false)
+  const [noteTarget, setNoteTarget] = useState<Row | null>(null)
+  const [selectedJustification, setSelectedJustification] = useState<string>('NONE')
+  const [noteContent, setNoteContent] = useState('')
 
   const submittedRef = useRef(false)
 
@@ -110,6 +138,9 @@ export default function ReviewView() {
           code: st.studentId,
           name: `${st.firstName} ${st.lastName}`,
           status: rec ? rec.status : 'ABSENT',
+          method: (rec?.method as AttendanceMethod) ?? (rec ? 'FACE' : 'MANUAL'),
+          justification: (rec?.justification as AttendanceJustification) ?? null,
+          note: rec?.note ?? null,
           confidence: rec?.confidence ?? null,
           markedAt: rec?.markedAt ?? nowISO,
         }
@@ -179,6 +210,31 @@ export default function ReviewView() {
     )
   }
 
+  const openNoteDialog = (r: Row) => {
+    setNoteTarget(r)
+    setSelectedJustification(r.justification ?? 'NONE')
+    setNoteContent(r.note ?? '')
+  }
+
+  const saveNote = () => {
+    if (!noteTarget) return
+    const j = selectedJustification === 'NONE' ? null : (selectedJustification as AttendanceJustification)
+    const n = noteContent.trim() || null
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.studentId !== noteTarget.studentId) return r
+        return {
+          ...r,
+          method: j || n ? 'MANUAL' : r.method,
+          justification: j,
+          note: n,
+        }
+      })
+    )
+    setNoteTarget(null)
+    toast.success(`Audit notes updated for ${noteTarget.name}`)
+  }
+
   const submit = async () => {
     if (!session || submitting || submittedRef.current) return
     setSubmitting(true)
@@ -186,6 +242,9 @@ export default function ReviewView() {
       const records: AttendanceRecord[] = rows.map((r) => ({
         studentId: r.studentId,
         status: r.status,
+        method: r.method ?? (r.status === 'ABSENT' ? 'MANUAL' : 'FACE'),
+        justification: r.justification ?? null,
+        note: r.note ?? null,
         confidence: r.confidence ?? null,
         markedAt: r.markedAt,
       }))
@@ -362,15 +421,51 @@ export default function ReviewView() {
                 <IdentityAvatar name={r.name} className="h-9 w-9" />
                 <div className="min-w-0 flex-1 leading-tight">
                   <p className="text-sm font-medium truncate">{r.name}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                     <span className="text-[11px] text-muted-foreground font-mono">{r.code}</span>
+                    {r.justification && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1.5 py-0 h-4 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-normal"
+                      >
+                        {JUSTIFICATION_LABELS[r.justification] ?? r.justification}
+                      </Badge>
+                    )}
+                    {r.note && (
+                      <span className="text-[10px] text-muted-foreground italic truncate max-w-[140px]">
+                        &ldquo;{r.note}&rdquo;
+                      </span>
+                    )}
                   </div>
                 </div>
-                <StatusSegment
-                  value={r.status}
-                  disabled={completed || offline}
-                  onChange={(s) => setStatus(r.studentId, s)}
-                />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      'h-8 w-8 rounded-lg',
+                      r.justification || r.note
+                        ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                        : 'text-muted-foreground hover:bg-accent'
+                    )}
+                    onClick={() => openNoteDialog(r)}
+                    disabled={completed || offline}
+                    aria-label={`Add note or justification for ${r.name}`}
+                    title={r.note || r.justification ? 'View/edit audit justification' : 'Add manual review note'}
+                  >
+                    {r.justification || r.note ? (
+                      <FileText className="h-4 w-4" />
+                    ) : (
+                      <MessageSquare className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <StatusSegment
+                    value={r.status}
+                    disabled={completed || offline}
+                    onChange={(s) => setStatus(r.studentId, s)}
+                  />
+                </div>
               </div>
             ))}
           </Card>
@@ -402,12 +497,75 @@ export default function ReviewView() {
         </div>
       )}
 
+      <Dialog open={!!noteTarget} onOpenChange={(open) => !open && setNoteTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Manual Review &amp; Justification
+            </DialogTitle>
+            <DialogDescription>
+              Record an institutional audit justification or note for {noteTarget?.name} ({noteTarget?.code}).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Justification Reason
+              </label>
+              <Select
+                value={selectedJustification}
+                onValueChange={setSelectedJustification}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select justification..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">None / Standard Check-in</SelectItem>
+                  {Object.entries(JUSTIFICATION_LABELS).map(([k, label]) => (
+                    <SelectItem key={k} value={k}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Audit Notes / Lecturer Comments
+              </label>
+              <Textarea
+                placeholder="e.g. Student presented medical pass, camera refused to focus, opted out of biometric capture..."
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                rows={3}
+                className="resize-none text-sm"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                These comments are exported in session CSV reports and sent to the Department Head.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setNoteTarget(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveNote}>
+              Save Justification
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Discard this session?</AlertDialogTitle>
             <AlertDialogDescription>
-              All {rows.length > 0 ? present + late : ''} check-ins for {session.courseCode} will be
+              All {rows.length > 0 ? present + late : ''} check-ins for {session?.courseCode} will be
               permanently deleted. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

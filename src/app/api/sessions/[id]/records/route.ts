@@ -15,6 +15,19 @@ import {
 const recordMutationSchema = z.object({
   studentId: z.string().min(1, 'Student ID is required'),
   status: z.enum(['PRESENT', 'LATE', 'ABSENT']),
+  method: z.enum(['FACE', 'MANUAL', 'ONLINE']).default('MANUAL'),
+  justification: z
+    .enum([
+      'CONSENT_OPT_OUT',
+      'MEDICAL_EXCUSE',
+      'CAMERA_ISSUE',
+      'LATE_PERMISSION',
+      'OFFICIAL_DUTY',
+      'OTHER',
+    ])
+    .nullable()
+    .optional(),
+  note: z.string().max(500).nullable().optional(),
   confidence: z.number().nullable().optional(),
 })
 
@@ -43,6 +56,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     const now = new Date()
 
+    const data = {
+      status: parsed.data.status,
+      method: parsed.data.method,
+      justification: parsed.data.justification ?? null,
+      note: parsed.data.note ?? null,
+      confidence: parsed.data.confidence ?? null,
+      markedAt: now,
+    }
+
     await db.attendanceRecord.upsert({
       where: {
         sessionId_studentId: {
@@ -53,15 +75,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       create: {
         sessionId: session.id,
         studentId: parsed.data.studentId,
-        status: parsed.data.status,
-        confidence: parsed.data.confidence ?? null,
-        markedAt: now,
+        ...data,
       },
-      update: {
-        status: parsed.data.status,
-        confidence: parsed.data.confidence ?? null,
-        markedAt: now,
-      },
+      update: data,
     })
 
     return NextResponse.json({ session: await loadSessionDetail(session.id) })
