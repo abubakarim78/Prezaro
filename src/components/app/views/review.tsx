@@ -182,6 +182,23 @@ export default function ReviewView() {
      
   }, [])
 
+  // Late-landing marks: records flushed right at End & review may reach the
+  // server just after the first load. While the offline queue still holds
+  // records for this session, poll briefly and refresh once it drains —
+  // captured students flip to PRESENT without a manual refresh.
+  useEffect(() => {
+    if (!sessionId || pendingForSession(sessionId).length === 0) return
+    let tries = 0
+    const timer = setInterval(() => {
+      tries += 1
+      if (pendingForSession(sessionId).length === 0 || tries >= 8) {
+        clearInterval(timer)
+        void load()
+      }
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [sessionId, load])
+
   // ---------- derived ----------
   const present = rows.filter((r) => r.status === 'PRESENT').length
   const late = rows.filter((r) => r.status === 'LATE').length

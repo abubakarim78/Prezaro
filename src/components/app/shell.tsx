@@ -83,6 +83,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!user) return null
 
+  // Super admin is platform-only: no attendance surfaces anywhere in the shell.
+  const isSuperAdmin = user.role === 'SUPERADMIN'
+  const sidebarNav = isSuperAdmin ? NAV.filter((n) => n.view === 'home') : NAV
+
   const logout = async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' })
@@ -131,7 +135,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map(({ view: v, label, icon: Icon }) => (
+          {sidebarNav.map(({ view: v, label, icon: Icon }) => (
             <button
               key={v}
               onClick={() => navigate(v)}
@@ -146,7 +150,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {label}
             </button>
           ))}
-          {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
+          {(user.role === 'ADMIN' || (isSuperAdmin && user.departmentId)) && (
             <button
               onClick={() => navigate('admin')}
               className={cn(
@@ -174,22 +178,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Platform Admin
             </button>
           )}
+          {isSuperAdmin && (
+            <button
+              onClick={() => navigate('settings')}
+              className={cn(
+                'w-full flex items-center gap-3 rounded-xl px-3 h-11 text-sm font-medium transition-colors min-h-11',
+                view === 'settings'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
+              )}
+            >
+              <Settings className="h-[18px] w-[18px]" />
+              Settings
+            </button>
+          )}
         </nav>
 
         <div className="p-3 border-t">
-          <div className="rounded-xl bg-accent/60 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-accent-foreground">
-              <ScanFace className="h-4 w-4" />
-              {openSession ? 'Attendance in progress' : 'Ready to take attendance'}
+          {!isSuperAdmin && (
+            <div className="rounded-xl bg-accent/60 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-accent-foreground">
+                <ScanFace className="h-4 w-4" />
+                {openSession ? 'Attendance in progress' : 'Ready to take attendance'}
+              </div>
+              <button
+                onClick={goScan}
+                className="mt-2 w-full h-9 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                {openSession ? 'Resume scan' : 'Start scan'}
+              </button>
             </div>
-            <button
-              onClick={goScan}
-              className="mt-2 w-full h-9 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              {openSession ? 'Resume scan' : 'Start scan'}
-            </button>
-          </div>
-          <div className="mt-3 flex items-center gap-3 px-2 pb-1">
+          )}
+          <div className={cn('flex items-center gap-3 px-2 pb-1', !isSuperAdmin && 'mt-3')}>
             <Avatar className="h-9 w-9">
               <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                 {initials(user.name)}
@@ -260,13 +280,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {online ? `Sync ${pendingSync}` : 'Offline'}
               </div>
             )}
-            <button
-              onClick={() => navigate('schedule')}
-              className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
-              aria-label="Class Timetable"
-            >
-              <CalendarDays className="h-[18px] w-[18px]" />
-            </button>
+            {!isSuperAdmin && (
+              <button
+                onClick={() => navigate('schedule')}
+                className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
+                aria-label="Class Timetable"
+              >
+                <CalendarDays className="h-[18px] w-[18px]" />
+              </button>
+            )}
             <button
               onClick={() => navigate('settings')}
               className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
@@ -282,26 +304,46 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* ---------- Mobile bottom nav ---------- */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-background/92 backdrop-blur-lg border-t pb-safe">
-        <div className="grid grid-cols-5 h-16 max-w-lg mx-auto items-center">
-          {NAV.slice(0, 2).map(({ view: v, label, icon: Icon }) => (
+        <div
+          className={cn(
+            'grid h-16 max-w-lg mx-auto items-center',
+            isSuperAdmin ? 'grid-cols-4' : 'grid-cols-5'
+          )}
+        >
+          {NAV.slice(0, isSuperAdmin ? 1 : 2).map(({ view: v, label, icon: Icon }) => (
             <NavTab key={v} active={view === v} label={label} onClick={() => navigate(v)}>
               <Icon className="h-[22px] w-[22px]" />
             </NavTab>
           ))}
 
-          <div className="flex justify-center">
-            <button
-              onClick={goScan}
-              className="-mt-6 flex h-14 w-14 flex-col items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-background transition-transform active:scale-95"
-              aria-label="Take attendance"
-            >
-              <FaceScanMark className="h-6 w-6" />
-            </button>
-          </div>
+          {!isSuperAdmin && (
+            <div className="flex justify-center">
+              <button
+                onClick={goScan}
+                className="-mt-6 flex h-14 w-14 flex-col items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30 ring-4 ring-background transition-transform active:scale-95"
+                aria-label="Take attendance"
+              >
+                <FaceScanMark className="h-6 w-6" />
+              </button>
+            </div>
+          )}
 
-          <NavTab active={view === 'sessions'} label="Sessions" onClick={() => navigate('sessions')}>
-            <History className="h-[22px] w-[22px]" />
-          </NavTab>
+          {!isSuperAdmin && (
+            <NavTab active={view === 'sessions'} label="Sessions" onClick={() => navigate('sessions')}>
+              <History className="h-[22px] w-[22px]" />
+            </NavTab>
+          )}
+
+          {isSuperAdmin && (
+            <NavTab active={view === 'platform'} label="Platform" onClick={() => navTo('platform')}>
+              <Globe2 className="h-[22px] w-[22px]" />
+            </NavTab>
+          )}
+          {isSuperAdmin && (
+            <NavTab active={view === 'settings'} label="Settings" onClick={() => navTo('settings')}>
+              <Settings className="h-[22px] w-[22px]" />
+            </NavTab>
+          )}
 
           <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
             <SheetTrigger asChild>
@@ -322,15 +364,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SheetTitle>
               </SheetHeader>
               <div className="px-4 pb-6 space-y-1.5">
-                <MoreItem icon={CalendarDays} label="Class Timetable" onClick={() => navTo('schedule')} />
-                {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
+                {!isSuperAdmin && (
+                  <MoreItem icon={CalendarDays} label="Class Timetable" onClick={() => navTo('schedule')} />
+                )}
+                {(user.role === 'ADMIN' || (isSuperAdmin && user.departmentId)) && (
                   <MoreItem icon={ShieldCheck} label="Department dashboard" onClick={() => navTo('admin')} />
                 )}
-                {user.role === 'SUPERADMIN' && (
-                  <MoreItem icon={Globe2} label="Platform Control Center" onClick={() => navTo('platform')} />
-                )}
-                <MoreItem icon={BarChart3} label="Reports" onClick={() => navTo('reports')} />
-                <MoreItem icon={Settings} label="Settings" onClick={() => navTo('settings')} />
+                {!isSuperAdmin && <MoreItem icon={BarChart3} label="Reports" onClick={() => navTo('reports')} />}
+                {!isSuperAdmin && <MoreItem icon={Settings} label="Settings" onClick={() => navTo('settings')} />}
                 <MoreItem icon={Smartphone} label="Install app on device" onClick={tryInstall} />
                 <MoreItem icon={LogOut} label="Sign out" onClick={logout} destructive />
               </div>

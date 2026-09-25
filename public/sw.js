@@ -1,5 +1,5 @@
 /* Prezaro service worker — offline-first app shell */
-const VERSION = 'prezaro-v2'
+const VERSION = 'prezaro-v3'
 const SHELL_CACHE = `${VERSION}-shell`
 const STATIC_CACHE = `${VERSION}-static`
 

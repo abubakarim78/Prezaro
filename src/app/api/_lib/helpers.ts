@@ -115,9 +115,18 @@ export async function requireSuperAdmin(req: Request): Promise<AuthUser> {
 
 export const courseCountInclude = Prisma.validator<Prisma.CourseInclude>()({
   _count: { select: { enrollments: true } },
+  lecturer: { select: { name: true, title: true } },
 })
 
-export function courseDTO(c: Course & { _count: { enrollments: number } }): CourseDTO {
+export function courseDTO(
+  c: Course & {
+    _count: { enrollments: number }
+    lecturer?: { name: string; title: string | null } | null
+  }
+): CourseDTO {
+  const lecturerName = c.lecturer
+    ? [c.lecturer.title, c.lecturer.name].filter(Boolean).join(' ')
+    : null
   return {
     id: c.id,
     code: c.code,
@@ -126,6 +135,8 @@ export function courseDTO(c: Course & { _count: { enrollments: number } }): Cour
     semester: c.semester,
     termSystem: c.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
     studentCount: c._count.enrollments,
+    lecturerId: c.lecturerId,
+    lecturerName: lecturerName || null,
   }
 }
 

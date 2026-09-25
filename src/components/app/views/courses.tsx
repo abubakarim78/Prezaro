@@ -2,8 +2,8 @@
 
 // ============================================================
 // Prezaro — Your courses
-// Course management for onboarded lecturers: list, add, edit.
-// Deliberately its own screen — NOT the onboarding wizard.
+// Read-only list for lecturers; create/edit is HoD + super admin
+// only (incl. assigning the course's teaching lecturer).
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react'
@@ -14,11 +14,13 @@ import {
   Link2,
   Loader2,
   Pencil,
+  User,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, getErrorMessage } from '@/lib/api'
+import { useAppStore } from '@/lib/store'
 import { termLabel, type Course, type CoursesResponse, type TermSystem } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -65,6 +67,10 @@ function termToValue(semester: number, termSystem: TermSystem): string {
 // ============================================================
 
 export default function CoursesView() {
+  const user = useAppStore((s) => s.user)
+  // Lecturers get a read-only roster view; only HoDs / the super admin manage.
+  const canManage = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN'
+
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -120,20 +126,22 @@ export default function CoursesView() {
           loading ? 'Loading…' : `${courses?.length ?? 0} course${(courses?.length ?? 0) === 1 ? '' : 's'}`
         }
         right={
-          <Button
-            className="min-h-11"
-            onClick={() => setFormOpen((v) => !v)}
-            aria-expanded={formOpen}
-          >
-            {formOpen ? <ChevronDown className="h-4 w-4" /> : <BookPlus className="h-4 w-4" />}
-            {formOpen ? 'Close' : 'Add course'}
-          </Button>
+          canManage ? (
+            <Button
+              className="min-h-11"
+              onClick={() => setFormOpen((v) => !v)}
+              aria-expanded={formOpen}
+            >
+              {formOpen ? <ChevronDown className="h-4 w-4" /> : <BookPlus className="h-4 w-4" />}
+              {formOpen ? 'Close' : 'Add course'}
+            </Button>
+          ) : undefined
         }
       />
 
       <div className="px-4 pb-6 lg:px-8">
         {/* ---------- Add course form ---------- */}
-        {formOpen && (
+        {canManage && formOpen && (
           <div className="mb-4 rounded-2xl border bg-card p-4 sm:p-5">
             <h2 className="text-sm font-semibold tracking-tight">New course</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -141,6 +149,7 @@ export default function CoursesView() {
             </p>
             <CourseForm
               className="mt-4"
+              showLecturer={canManage}
               submittingLabel="Creating…"
               submitLabel="Create course"
               onSubmit={async (body) => {
@@ -175,9 +184,11 @@ export default function CoursesView() {
             title="No courses yet"
             description="Create your first course to start taking attendance for it."
             action={
-              <Button className="min-h-11" onClick={() => setFormOpen(true)}>
-                <BookPlus className="h-4 w-4" /> Add your first course
-              </Button>
+              canManage ? (
+                <Button className="min-h-11" onClick={() => setFormOpen(true)}>
+                  <BookPlus className="h-4 w-4" /> Add your first course
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -202,27 +213,34 @@ export default function CoursesView() {
                     <span className="inline-flex items-center gap-1">
                       <Users className="h-3 w-3" /> {c.studentCount}
                     </span>
+                    <span className="inline-flex items-center gap-1">
+                      <User className="h-3 w-3" /> {c.lecturerName ?? 'Unassigned'}
+                    </span>
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-9 shrink-0 text-muted-foreground hover:text-primary"
-                  onClick={() => copyEnrollLink(c)}
-                  aria-label={`Copy student enrollment link for ${c.code}`}
-                  title="Copy student self-enrollment link for this course"
-                >
-                  <Link2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-9 shrink-0 text-muted-foreground"
-                  onClick={() => setEditing(c)}
-                  aria-label={`Edit ${c.code}`}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
+                {canManage && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 shrink-0 text-muted-foreground hover:text-primary"
+                      onClick={() => copyEnrollLink(c)}
+                      aria-label={`Copy student enrollment link for ${c.code}`}
+                      title="Copy student self-enrollment link for this course"
+                    >
+                      <Link2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 shrink-0 text-muted-foreground"
+                      onClick={() => setEditing(c)}
+                      aria-label={`Edit ${c.code}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -242,6 +260,7 @@ export default function CoursesView() {
             <CourseForm
               key={editing.id}
               initial={editing}
+              showLecturer={canManage}
               submittingLabel="Saving…"
               submitLabel="Save changes"
               onSubmit={async (body) => {
@@ -267,6 +286,15 @@ interface CourseBody {
   level: number
   semester: number
   termSystem: TermSystem
+  lecturerId?: string
+}
+
+/** Department staff entry for the lecturer assignment select. */
+interface StaffMember {
+  id: string
+  name: string
+  title?: string | null
+  role: 'LECTURER' | 'ADMIN'
 }
 
 function CourseForm({
@@ -275,20 +303,42 @@ function CourseForm({
   submitLabel,
   submittingLabel,
   className,
+  showLecturer = false,
 }: {
   initial?: Course
   onSubmit: (body: CourseBody) => Promise<void>
   submitLabel: string
   submittingLabel: string
   className?: string
+  showLecturer?: boolean
 }) {
+  const user = useAppStore((s) => s.user)
   const [code, setCode] = useState(initial?.code ?? '')
   const [title, setTitle] = useState(initial?.title ?? '')
   const [level, setLevel] = useState(String(initial?.level ?? 100))
   const [term, setTerm] = useState(
     initial ? termToValue(initial.semester, initial.termSystem) : 'S1'
   )
+  const [lecturerId, setLecturerId] = useState(initial?.lecturerId ?? user?.id ?? '')
+  const [staff, setStaff] = useState<StaffMember[] | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // HoD / super admin only: department staff for the lecturer select.
+  useEffect(() => {
+    if (!showLecturer) return
+    let cancelled = false
+    api<{ staff: StaffMember[] }>('/api/departments/staff')
+      .then((d) => {
+        if (!cancelled) setStaff(d.staff)
+      })
+      .catch(() => {
+        // Select falls back to the creator when the list can't load.
+        if (!cancelled) setStaff(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showLecturer])
 
   const valid = code.trim().length > 0 && title.trim().length > 0
 
@@ -303,6 +353,7 @@ function CourseForm({
         level: Number(level) || 100,
         semester,
         termSystem,
+        ...(lecturerId ? { lecturerId } : {}),
       })
     } catch (e) {
       toast.error(getErrorMessage(e))
@@ -371,6 +422,27 @@ function CourseForm({
           </SelectContent>
         </Select>
       </div>
+      {showLecturer && (
+        <div className="space-y-1.5">
+          <Label htmlFor="cf-lecturer">Lecturer</Label>
+          <Select value={lecturerId} onValueChange={setLecturerId}>
+            <SelectTrigger id="cf-lecturer" className="h-11 w-full">
+              <SelectValue placeholder={staff === null ? 'Loading staff…' : 'Select lecturer'} />
+            </SelectTrigger>
+            <SelectContent>
+              {(staff ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.title ? `${m.title} ${m.name}` : m.name}
+                  {m.role === 'ADMIN' ? ' (HoD)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">
+            Timetable slots for this course belong to this lecturer.
+          </p>
+        </div>
+      )}
       <Button type="submit" className="min-h-11 w-full" disabled={!valid || saving}>
         {saving ? (
           <>

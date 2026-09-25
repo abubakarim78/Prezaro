@@ -77,6 +77,9 @@ const LEVELS = [100, 200, 300, 400, 500, 600] as const
 
 export default function StudentsView() {
   const navigate = useAppStore((s) => s.navigate)
+  // Lecturers get a read-only roster; only HoDs / the super admin add students.
+  const canManage =
+    useAppStore((s) => s.user?.role === 'ADMIN' || s.user?.role === 'SUPERADMIN')
 
   // ---- data ----
   const [students, setStudents] = useState<StudentListItem[] | null>(null)
@@ -258,25 +261,27 @@ export default function StudentsView() {
         title="Students"
         subtitle={loading ? 'Loading…' : `${filtered.length} student${filtered.length === 1 ? '' : 's'}`}
         right={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="min-h-11">
-                <Plus className="h-4 w-4" /> Add
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Add students
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setNewOpen(true)}>
-                <UserRoundPlus className="h-4 w-4" /> New student
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setImportOpen(true)}>
-                <FileSpreadsheet className="h-4 w-4" /> Import roster (Excel, Word, CSV)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          canManage ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="min-h-11">
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  Add students
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setNewOpen(true)}>
+                  <UserRoundPlus className="h-4 w-4" /> New student
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                  <FileSpreadsheet className="h-4 w-4" /> Import roster (Excel, Word, CSV)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : undefined
         }
       />
 
@@ -372,16 +377,22 @@ export default function StudentsView() {
                 <EmptyState
                   icon={Users}
                   title="No students yet"
-                  description="Add students one by one or import an Excel, Word, or CSV roster."
+                  description={
+                    canManage
+                      ? 'Add students one by one or import an Excel, Word, or CSV roster.'
+                      : 'Students added by your department head will appear here.'
+                  }
                   action={
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      <Button className="min-h-11" onClick={() => setNewOpen(true)}>
-                        <UserRoundPlus className="h-4 w-4" /> Add student
-                      </Button>
-                      <Button variant="outline" className="min-h-11" onClick={() => setImportOpen(true)}>
-                        <FileSpreadsheet className="h-4 w-4" /> Import roster
-                      </Button>
-                    </div>
+                    canManage ? (
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <Button className="min-h-11" onClick={() => setNewOpen(true)}>
+                          <UserRoundPlus className="h-4 w-4" /> Add student
+                        </Button>
+                        <Button variant="outline" className="min-h-11" onClick={() => setImportOpen(true)}>
+                          <FileSpreadsheet className="h-4 w-4" /> Import roster
+                        </Button>
+                      </div>
+                    ) : undefined
                   }
                 />
               )}
@@ -438,7 +449,7 @@ export default function StudentsView() {
                       <DropdownMenuItem onClick={() => navigate('student', { studentId: s.id })}>
                         <Eye className="h-4 w-4 mr-2" /> View details
                       </DropdownMenuItem>
-                      {courseFilter !== 'all' && (
+                      {canManage && courseFilter !== 'all' && (
                         <DropdownMenuItem
                           onClick={() =>
                             setUnenrollTarget({
@@ -452,13 +463,17 @@ export default function StudentsView() {
                           <UserMinus className="h-4 w-4 mr-2" /> Remove from class
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => setDeleteTarget(s)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" /> Delete student
-                      </DropdownMenuItem>
+                      {canManage && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => setDeleteTarget(s)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> Delete student
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </motion.div>

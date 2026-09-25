@@ -72,7 +72,9 @@ export async function POST(req: Request) {
     const created = await db.classSchedule.create({
       data: {
         courseId: course.id,
-        lecturerId: user.id,
+        // Slots created by a HoD belong to the course's teaching lecturer
+        // so they can reschedule their own classes.
+        lecturerId: course.lecturerId ?? user.id,
         dayOfWeek: parsed.data.dayOfWeek,
         startTime: parsed.data.startTime,
         endTime: parsed.data.endTime,

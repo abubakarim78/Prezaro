@@ -39,10 +39,12 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     })
     if (!existing) throw new NotFoundError('Schedule not found')
 
+    // The teaching lecturer (schedule owner or course lecturer) can always
+    // reschedule — directly, with no approval step.
     const allowed =
       user.role === 'ADMIN'
         ? existing.course.departmentId === user.departmentId
-        : existing.lecturerId === user.id
+        : existing.lecturerId === user.id || existing.course.lecturerId === user.id
     if (!allowed) throw new ForbiddenError('You cannot edit this schedule')
 
     const body = await readJson(req)
@@ -137,7 +139,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     const allowed =
       user.role === 'ADMIN'
         ? existing.course.departmentId === user.departmentId
-        : existing.lecturerId === user.id
+        : existing.lecturerId === user.id || existing.course.lecturerId === user.id
     if (!allowed) throw new ForbiddenError('You cannot delete this schedule')
 
     await db.classSchedule.delete({ where: { id } })

@@ -15,6 +15,7 @@ import {
   CameraOff,
   Check,
   Clock,
+  Loader2,
   LogOut,
   RefreshCw,
   ScanFace,
@@ -622,9 +623,10 @@ function LiveScreen({
   const bufferRef = useRef<Map<string, AttendanceRecord>>(new Map())
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncingRef = useRef(false)
-  const dirtyRef = useRef(false)
   const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // End & review shows "Saving…" until every buffered mark reaches the server
+  const [endingReview, setEndingReview] = useState(false)
 
   // ---------- static maps ----------
   useEffect(() => {
@@ -685,39 +687,41 @@ function LiveScreen({
   }, [facing, retryKey])
 
   // ---------- check-in + sync ----------
+  // Drains the buffer completely and can be awaited — End & review must not
+  // navigate until every buffered mark has reached the server (a
+  // fire-and-forget flush used to race the review GET and show captured
+  // students as absent). Bounded so a dead network can't hang the UI.
   const flushSync = useCallback(async () => {
-    if (syncingRef.current) {
-      dirtyRef.current = true
-      return
-    }
-    const records = [...bufferRef.current.values()]
-    if (records.length === 0) return
-    syncingRef.current = true
-    try {
-      await api<{ saved: number }>(`/api/sessions/${session.id}/sync`, {
-        method: 'POST',
-        body: {
-          records: records.map<AttendanceRecord>((r) => ({
-            studentId: r.studentId,
-            name: r.name,
-            status: r.status,
-            confidence: r.confidence ?? null,
-            markedAt: r.markedAt,
-          })),
-        },
-      })
-      for (const r of records) {
-        bufferRef.current.delete(r.studentId)
-        removeQueued(session.id, r.studentId)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      while (syncingRef.current) {
+        await new Promise((r) => setTimeout(r, 120))
       }
-      useAppStore.getState().setPendingSync(pendingCount())
-    } catch {
-      // stay queued — global flushQueue retries on reconnect
-    } finally {
-      syncingRef.current = false
-      if (dirtyRef.current) {
-        dirtyRef.current = false
-        setTimeout(() => void flushSyncRef.current(), 1000)
+      const records = [...bufferRef.current.values()]
+      if (records.length === 0) return
+      syncingRef.current = true
+      try {
+        await api<{ saved: number }>(`/api/sessions/${session.id}/sync`, {
+          method: 'POST',
+          body: {
+            records: records.map<AttendanceRecord>((r) => ({
+              studentId: r.studentId,
+              name: r.name,
+              status: r.status,
+              confidence: r.confidence ?? null,
+              markedAt: r.markedAt,
+            })),
+          },
+        })
+        for (const r of records) {
+          bufferRef.current.delete(r.studentId)
+          removeQueued(session.id, r.studentId)
+        }
+        useAppStore.getState().setPendingSync(pendingCount())
+      } catch {
+        // stay queued — brief backoff, global flushQueue retries on reconnect
+        await new Promise((r) => setTimeout(r, 500))
+      } finally {
+        syncingRef.current = false
       }
     }
   }, [session.id])
@@ -971,10 +975,20 @@ function LiveScreen({
   }, [])
 
   // ---------- end / discard ----------
-  const endAndReview = useCallback(() => {
+  const endAndReview = useCallback(async () => {
     setExitOpen(false)
-    void flushSyncRef.current()
-    navigate('review', { sessionId: session.id })
+    setEndingReview(true)
+    try {
+      // Push every buffered mark before review reads the server; cap the
+      // wait so a dead network can't trap the lecturer on this screen.
+      await Promise.race([
+        flushSyncRef.current(),
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ])
+    } finally {
+      setEndingReview(false)
+      navigate('review', { sessionId: session.id })
+    }
   }, [navigate, session.id])
 
   const discardSession = useCallback(async () => {
@@ -1133,8 +1147,18 @@ function LiveScreen({
             >
               <UserPlus className="h-4 w-4" /> Add manually
             </Button>
-            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
-              End &amp; review
+            <Button
+              className="h-12 flex-1 gap-2 text-base font-semibold"
+              onClick={endAndReview}
+              disabled={endingReview}
+            >
+              {endingReview ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" /> Saving…
+                </>
+              ) : (
+                'End & review'
+              )}
             </Button>
           </div>
         </footer>
@@ -1184,8 +1208,18 @@ function LiveScreen({
             >
               <UserPlus className="h-4 w-4" /> Add manually
             </Button>
-            <Button className="h-12 flex-1 text-base font-semibold" onClick={endAndReview}>
-              End &amp; review
+            <Button
+              className="h-12 flex-1 gap-2 text-base font-semibold"
+              onClick={endAndReview}
+              disabled={endingReview}
+            >
+              {endingReview ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" /> Saving…
+                </>
+              ) : (
+                'End & review'
+              )}
             </Button>
           </div>
         </footer>
@@ -1201,8 +1235,14 @@ function LiveScreen({
               : 'No one has checked in yet.'}
           </AlertDialogDescription>
           <AlertDialogFooter className="flex-col gap-2">
-            <Button className="h-11 w-full" onClick={endAndReview} disabled={discarding}>
-              End &amp; review
+            <Button className="h-11 w-full" onClick={endAndReview} disabled={discarding || endingReview}>
+              {endingReview ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+                </>
+              ) : (
+                'End & review'
+              )}
             </Button>
             <Button
               variant="outline"

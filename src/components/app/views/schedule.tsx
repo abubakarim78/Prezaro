@@ -22,7 +22,13 @@ import {
   Trash2,
   Users,
 } from 'lucide-react'
-import type { ClassSchedule, Course, CoursesResponse, SchedulesResponse } from '@/lib/types'
+import type {
+  ClassSchedule,
+  Course,
+  CoursesResponse,
+  ScheduleResponse,
+  SchedulesResponse,
+} from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -162,6 +168,7 @@ export default function ScheduleView() {
   const [editingSchedule, setEditingSchedule] = useState<ClassSchedule | null>(null)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [togglingAlertId, setTogglingAlertId] = useState<string | null>(null)
 
   // Reschedule modal state
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
@@ -214,6 +221,29 @@ export default function ScheduleView() {
       toast.success('Mobile notifications enabled for upcoming classes!')
     } else {
       toast.info('Notifications were not enabled.')
+    }
+  }
+
+  // One-tap alert toggle on each schedule card: flips the email reminder
+  // on/off without opening the edit dialog. Lead time stays configurable
+  // in the edit dialog.
+  const handleToggleAlert = async (s: ClassSchedule) => {
+    setTogglingAlertId(s.id)
+    try {
+      const res = await api<ScheduleResponse>(`/api/schedules/${s.id}`, {
+        method: 'PUT',
+        body: { notifyEmail: !s.notifyEmail },
+      })
+      setSchedules((prev) => prev.map((p) => (p.id === s.id ? res.schedule : p)))
+      toast.success(
+        res.schedule.notifyEmail
+          ? `Alerts on for ${s.courseCode} — ${s.reminderLeadMinutes || 30}m before class`
+          : `Alerts muted for ${s.courseCode}`
+      )
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setTogglingAlertId(null)
     }
   }
 
@@ -661,6 +691,34 @@ export default function ScheduleView() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        disabled={togglingAlertId === s.id}
+                        onClick={() => void handleToggleAlert(s)}
+                        className={cn(
+                          'h-9 w-9',
+                          s.notifyEmail
+                            ? 'text-primary hover:text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                        aria-label={
+                          s.notifyEmail ? 'Mute lecture alerts' : 'Enable lecture alerts'
+                        }
+                        title={
+                          s.notifyEmail
+                            ? `Alerts on — ${s.reminderLeadMinutes || 30}m before class. Tap to mute.`
+                            : 'Alerts muted. Tap to enable.'
+                        }
+                      >
+                        {togglingAlertId === s.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : s.notifyEmail ? (
+                          <BellRing className="h-4 w-4" />
+                        ) : (
+                          <Bell className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => openEditModal(s)}
                         className="h-9 w-9 text-muted-foreground hover:text-foreground"
                         aria-label="Edit schedule"
@@ -926,7 +984,7 @@ export default function ScheduleView() {
 
       {/* Reschedule Class Dialog */}
       <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
-        <DialogContent className="max-w-md sm:max-w-lg rounded-2xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-md sm:max-w-lg rounded-2xl p-5 sm:p-6 max-h-[92dvh] overflow-y-auto scrollbar-thin overscroll-contain pb-safe">
           <DialogHeader>
             <div className="flex items-center gap-1.5 text-primary font-bold text-xs uppercase tracking-wider">
               <CalendarClock className="h-4 w-4" />
@@ -943,17 +1001,17 @@ export default function ScheduleView() {
           {/* Current schedule banner */}
           {rescheduleTarget && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs space-y-1">
-              <div className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200">
                 <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>Current Slot:</span>
-                <span className="font-bold">
-                  {DAYS.find((d) => d.day === rescheduleTarget.dayOfWeek)?.name},{' '}
-                  {rescheduleTarget.startTime} – {rescheduleTarget.endTime}
-                </span>
-                {rescheduleTarget.venue ? (
-                  <span className="text-muted-foreground">({rescheduleTarget.venue})</span>
-                ) : null}
+                <span>Current Slot</span>
               </div>
+              <p className="font-bold text-amber-900 dark:text-amber-200">
+                {DAYS.find((d) => d.day === rescheduleTarget.dayOfWeek)?.name},{' '}
+                {rescheduleTarget.startTime} – {rescheduleTarget.endTime}
+                {rescheduleTarget.venue ? (
+                  <span className="font-normal text-muted-foreground"> · {rescheduleTarget.venue}</span>
+                ) : null}
+              </p>
               <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
                 Choose the new day, time, and lecture hall below.
               </p>

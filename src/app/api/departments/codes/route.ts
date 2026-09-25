@@ -96,6 +96,12 @@ export async function POST(req: Request) {
     const parsed = createCodeSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
 
+    // Only the platform super admin mints HoD (ADMIN-role) codes —
+    // department heads invite lecturers only.
+    if (parsed.data.role === 'ADMIN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only the platform super admin can create HoD access codes')
+    }
+
     const targetDeptId = user.role === 'SUPERADMIN' && parsed.data.departmentId
       ? parsed.data.departmentId
       : user.departmentId

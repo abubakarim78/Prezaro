@@ -148,8 +148,9 @@ function PrezaroInner() {
   }, [setBooted, setUser, setOnline, setPendingSync, replace, setOpenSession])
 
   // ---- Background check for upcoming class notifications ----
+  // Super admin is platform-only — no class / attendance notifications.
   useEffect(() => {
-    if (!user) return
+    if (!user || user.role === 'SUPERADMIN') return
     let active = true
 
     const runCheck = async () => {

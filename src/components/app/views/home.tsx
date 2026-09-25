@@ -6,13 +6,18 @@ import { format, isToday, isYesterday } from 'date-fns'
 import {
   BarChart3,
   BookPlus,
+  Building2,
   CalendarClock,
   CalendarDays,
   ChevronRight,
   Clock,
   Download,
+  Globe2,
+  GraduationCap,
+  Mail,
   MapPin,
   Play,
+  Plus,
   ScanFace,
   UserPlus,
   Users,
@@ -47,10 +52,13 @@ export default function HomeView() {
   const openSession = useAppStore((s) => s.openSession)
   const navigate = useAppStore((s) => s.navigate)
 
-  const coursesBlock = useApiBlock<CoursesResponse>('/api/courses')
-  const reportBlock = useApiBlock<{ report: DepartmentReport }>('/api/reports/department')
-  const sessionsBlock = useApiBlock<SessionsResponse>('/api/sessions?limit=5')
-  const schedulesBlock = useApiBlock<SchedulesResponse>('/api/schedules')
+  // Super admin is platform-only: no courses/attendance data is fetched at all.
+  const isSuperAdmin = user?.role === 'SUPERADMIN'
+
+  const coursesBlock = useApiBlock<CoursesResponse>('/api/courses', !isSuperAdmin)
+  const reportBlock = useApiBlock<{ report: DepartmentReport }>('/api/reports/department', !isSuperAdmin)
+  const sessionsBlock = useApiBlock<SessionsResponse>('/api/sessions?limit=5', !isSuperAdmin)
+  const schedulesBlock = useApiBlock<SchedulesResponse>('/api/schedules', !isSuperAdmin)
 
   // ---- install prompt ----
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
@@ -140,6 +148,152 @@ export default function HomeView() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const todayLabel = format(new Date(), 'EEEE, d MMMM')
+
+  // Last managed department (remembered by the platform manage drawer) so
+  // super admin quick links land in the right department context.
+  const [lastDept] = useState<{ id: string; name: string } | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = localStorage.getItem('prezaro.platformDept.v1')
+      return raw ? (JSON.parse(raw) as { id: string; name: string }) : null
+    } catch {
+      return null
+    }
+  })
+
+  // ---------- Super admin home: platform management only ----------
+  // No attendance surfaces — quick links into the Platform Control Center.
+  if (isSuperAdmin) {
+    return (
+      <div className="mx-auto w-full max-w-3xl">
+        <div className="px-4 lg:px-8 pb-6 pt-5 lg:pt-8">
+          <motion.header
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+          >
+            <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-balance">
+              {greeting}, {displayLast || firstName}
+            </h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">{todayLabel}</p>
+          </motion.header>
+
+          <div className="mt-4 space-y-4">
+            {/* ---------- Platform Control Center card ---------- */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/15 via-primary/5 to-card p-4"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary">
+                  <Globe2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <p className="text-sm font-bold tracking-tight">Platform Control Center</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Institutions, departments, users, and policies.
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="mt-3 w-full min-h-11 rounded-xl font-semibold gap-1.5"
+                onClick={() => navigate('platform')}
+              >
+                Open Control Center <ChevronRight className="h-4 w-4" />
+              </Button>
+            </motion.div>
+
+            {/* ---------- Platform quick actions ---------- */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <QuickAction
+                icon={Building2}
+                label="Institutions"
+                onClick={() => navigate('platform', { tab: 'institutions' })}
+              />
+              <QuickAction
+                icon={GraduationCap}
+                label="Departments"
+                onClick={() => navigate('platform', { tab: 'departments' })}
+              />
+              <QuickAction
+                icon={Users}
+                label="Users"
+                onClick={() => navigate('platform', { tab: 'users' })}
+              />
+              <QuickAction
+                icon={Mail}
+                label="Outbox Audit"
+                onClick={() => navigate('platform', { openLogs: '1' })}
+              />
+              <QuickAction
+                icon={Plus}
+                label="Provision Institution"
+                onClick={() => navigate('platform', { tab: 'institutions', provision: '1' })}
+              />
+            </div>
+
+            {/* ---------- Continue managing remembered department ---------- */}
+            {lastDept && (
+              <motion.button
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: 0.05 }}
+                onClick={() => navigate('platform', { tab: 'departments', manage: lastDept.id })}
+                className="flex w-full items-center gap-3 rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/50"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <GraduationCap className="h-5 w-5" />
+                </div>
+                <span className="min-w-0 flex-1 leading-tight">
+                  <span className="block truncate text-sm font-semibold">
+                    Continue managing {lastDept.name}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Courses, students, HoD invites, and submissions.
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </motion.button>
+            )}
+
+            {/* ---------- Install banner ---------- */}
+            {!installDismissed && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: 0.1 }}
+                className="flex items-center gap-3 rounded-2xl border bg-card p-4"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Download className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1 leading-tight">
+                  <p className="text-sm font-semibold">Install Prezaro on your phone</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Works offline, opens full-screen, no app store needed.
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button size="sm" className="min-h-11 sm:min-h-9" onClick={tryInstall}>
+                    Install
+                  </Button>
+                  <button
+                    onClick={dismissInstall}
+                    className="flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent sm:h-9 sm:w-9"
+                    aria-label="Dismiss install banner"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -243,7 +397,7 @@ export default function HomeView() {
                 {upcomingToday.status === 'ongoing' ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                    Class in progress
+                    Now teaching
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary shrink-0">
@@ -303,7 +457,7 @@ export default function HomeView() {
                   }
                 >
                   <ScanFace className="h-4 w-4" />
-                  Take attendance
+                  {upcomingToday.status === 'ongoing' ? 'Start attendance' : 'Take attendance'}
                 </Button>
               </div>
             </motion.div>
@@ -370,9 +524,18 @@ export default function HomeView() {
 
           {/* ---------- Quick actions ---------- */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <QuickAction icon={UserPlus} label="Add student" onClick={() => navigate('students')} />
+            {/* Lecturers can't create — plain navigation labels for them. */}
+            <QuickAction
+              icon={UserPlus}
+              label={user?.role === 'ADMIN' ? 'Add student' : 'Students'}
+              onClick={() => navigate('students')}
+            />
             <QuickAction icon={CalendarDays} label="Timetable" onClick={() => navigate('schedule')} />
-            <QuickAction icon={BookPlus} label="New course" onClick={() => navigate('courses')} />
+            <QuickAction
+              icon={BookPlus}
+              label={user?.role === 'ADMIN' ? 'New course' : 'Courses'}
+              onClick={() => navigate('courses')}
+            />
             <QuickAction icon={BarChart3} label="Reports" onClick={() => navigate('reports')} />
           </div>
 
@@ -484,14 +647,16 @@ export default function HomeView() {
 
 // ---------- helpers ----------
 
-function useApiBlock<T>(path: string) {
+function useApiBlock<T>(path: string, enabled = true) {
   const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState<string | null>(null)
 
-  // Initial + path-change load: setState only fires after an await, so the
-  // effect never updates state synchronously.
+  // Initial + path-change load: `loading` starts at `enabled`, so a disabled
+  // block needs no state change; otherwise setState only fires after an await
+  // and the effect never updates state synchronously.
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     ;(async () => {
       try {
@@ -511,7 +676,7 @@ function useApiBlock<T>(path: string) {
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, enabled])
 
   // Manual reload from retry buttons (event-handler context — sync setState is fine here).
   const reload = useCallback(() => {

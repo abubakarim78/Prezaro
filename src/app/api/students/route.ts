@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { BadRequestError, requireUser } from '@/lib/auth'
+import { BadRequestError, ForbiddenError, requireUser } from '@/lib/auth'
 import { STUDENT_ID_PATTERN } from '@/lib/types'
 import { sortStudentsByYearId } from '@/lib/student-sort'
 import { queueEmail, studentRegisteredHtml, courseEnrollmentHtml } from '@/lib/email'
@@ -74,6 +74,7 @@ const createSchema = z
     bulk: z.string().optional(),
     students: z.array(singleSchema).optional(),
     courseId: z.string().optional(),
+    departmentId: z.string().optional(),
   })
   .refine(
     (d) =>
@@ -135,11 +136,21 @@ function parseBulkCsv(raw: string): { rows: ParsedRow[]; invalid: number } {
 export async function POST(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (!user.departmentId) {
-      throw new BadRequestError('Join a department before adding students')
+    if (user.role === 'LECTURER') {
+      throw new ForbiddenError('Only department heads can add students')
     }
     const parsed = createSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
+
+    // HoDs manage their own department's students; the super admin targets
+    // any department via the optional body departmentId.
+    const departmentId =
+      user.role === 'SUPERADMIN' && parsed.data.departmentId
+        ? parsed.data.departmentId
+        : user.departmentId
+    if (!departmentId) {
+      throw new BadRequestError('A department is required to add students')
+    }
 
     // If courseId provided, ensure lecturer owns or can access the course
     let targetCourse: { id: string; code: string; title: string } | null = null
@@ -199,7 +210,7 @@ export async function POST(req: Request) {
           level: r.level,
           email: r.email,
           phone: r.phone,
-          departmentId: user.departmentId,
+          departmentId,
           descriptorsJson: '[]',
         })),
       })
@@ -214,14 +225,13 @@ export async function POST(req: Request) {
     // Registration notifications — fire-and-forget, students with an
     // email address get a confirmation that they are on the register.
     if (created.length > 0) {
-      const departmentName = user.departmentId
-        ? (
-            await db.department.findUnique({
-              where: { id: user.departmentId },
-              select: { name: true },
-            })
-          )?.name ?? 'your department'
-        : 'your department'
+      const departmentName =
+        (
+          await db.department.findUnique({
+            where: { id: departmentId },
+            select: { name: true },
+          })
+        )?.name ?? 'your department'
       for (const student of created) {
         if (!student.email) continue
         queueEmail({

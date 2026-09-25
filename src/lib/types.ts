@@ -104,6 +104,8 @@ export interface Course {
   semester: number // 1..3
   termSystem: TermSystem
   studentCount: number
+  lecturerId?: string
+  lecturerName?: string | null
 }
 
 /** Human label for a course term, e.g. "Trimester 2" / "Semester 1". */

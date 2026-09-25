@@ -22,7 +22,11 @@ export function PageHeader({
         <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-balance">{title}</h1>
         {subtitle && <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>}
       </div>
-      {right && <div className="flex flex-wrap items-center gap-2 shrink-0">{right}</div>}
+      {right && (
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+          {right}
+        </div>
+      )}
     </div>
   )
 }

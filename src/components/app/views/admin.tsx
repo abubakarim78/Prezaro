@@ -325,33 +325,33 @@ export default function AdminView() {
           <TabsList className="grid grid-cols-3 w-full h-11 bg-muted/70 p-1 rounded-xl">
             <TabsTrigger
               value="analytics"
-              className="flex items-center gap-2 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+              className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
             >
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Analytics &amp; Attendance</span>
-              <span className="sm:hidden">Analytics</span>
+              <BarChart3 className="h-4 w-4 shrink-0" />
+              <span className="hidden min-w-0 truncate sm:inline">Analytics &amp; Attendance</span>
+              <span className="min-w-0 truncate sm:hidden">Analytics</span>
             </TabsTrigger>
             <TabsTrigger
               value="codes"
-              className="flex items-center gap-2 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+              className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
             >
-              <Ticket className="h-4 w-4" />
-              <span>Lecturer Access</span>
+              <Ticket className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">Lecturer Access</span>
               {codes.filter((c) => c.status === 'ACTIVE').length > 0 && (
-                <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.2 text-[10px] text-primary">
+                <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                   {codes.filter((c) => c.status === 'ACTIVE').length}
                 </span>
               )}
             </TabsTrigger>
             <TabsTrigger
               value="enrollments"
-              className="flex items-center gap-2 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+              className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
             >
-              <UserCheck className="h-4 w-4" />
-              <span className="hidden sm:inline">Student Self-Enroll</span>
-              <span className="sm:hidden">Enrollments</span>
+              <UserCheck className="h-4 w-4 shrink-0" />
+              <span className="hidden min-w-0 truncate sm:inline">Student Self-Enroll</span>
+              <span className="min-w-0 truncate sm:hidden">Enrollments</span>
               {pendingSubmissions.length > 0 && (
-                <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
                   {pendingSubmissions.length}
                 </span>
               )}
@@ -911,7 +911,7 @@ export default function AdminView() {
 
       {/* DIALOG: GENERATE ACCESS CODE */}
       <Dialog open={createCodeOpen} onOpenChange={setCreateCodeOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[92dvh] overflow-y-auto scrollbar-thin sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Ticket className="h-5 w-5 text-primary" />
@@ -931,7 +931,10 @@ export default function AdminView() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="LECTURER">Lecturer (Course &amp; Attendance Access)</SelectItem>
-                  <SelectItem value="ADMIN">Department Admin / HOD (Full Management)</SelectItem>
+                  {/* Only the platform super admin mints HoD codes */}
+                  {user?.role === 'SUPERADMIN' && (
+                    <SelectItem value="ADMIN">Department Admin / HOD (Full Management)</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -1047,7 +1050,7 @@ export default function AdminView() {
 
       {/* DIALOG: SHARE ENROLLMENT LINK */}
       <Dialog open={shareLinkOpen} onOpenChange={setShareLinkOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[92dvh] overflow-y-auto scrollbar-thin sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="h-5 w-5 text-primary" />
@@ -1081,8 +1084,8 @@ export default function AdminView() {
             </div>
 
             <div className="rounded-xl border bg-muted/40 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-foreground min-w-0">
                   {selectedShareCourseId === 'all'
                     ? 'Department-Wide Enrollment Link'
                     : 'Specific Course Direct Enrollment Link'}
@@ -1093,20 +1096,16 @@ export default function AdminView() {
                   </Badge>
                 )}
               </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Input
-                  readOnly
-                  value={getPublicEnrollUrl()}
-                  className="font-mono text-xs bg-background min-w-0 flex-1 truncate"
-                />
-                <Button
-                  size="sm"
-                  className="shrink-0 gap-1.5 font-semibold w-full sm:w-auto"
-                  onClick={() => copyText(getPublicEnrollUrl(), selectedShareCourseId === 'all' ? 'Department Enrollment Link' : 'Course Enrollment Link')}
-                >
-                  <Copy className="h-3.5 w-3.5" /> Copy Link
-                </Button>
-              </div>
+              <p className="min-w-0 rounded-lg border bg-background px-3 py-2.5 font-mono text-xs break-all">
+                {getPublicEnrollUrl()}
+              </p>
+              <Button
+                size="sm"
+                className="shrink-0 gap-1.5 font-semibold w-full sm:w-auto"
+                onClick={() => copyText(getPublicEnrollUrl(), selectedShareCourseId === 'all' ? 'Department Enrollment Link' : 'Course Enrollment Link')}
+              >
+                <Copy className="h-3.5 w-3.5" /> Copy Link
+              </Button>
             </div>
 
             <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground space-y-1">

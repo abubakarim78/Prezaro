@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { BadRequestError, ConflictError, requireUser } from '@/lib/auth'
+import { BadRequestError, ConflictError, ForbiddenError, requireUser } from '@/lib/auth'
 import {
   courseCountInclude,
   courseDTO,
@@ -29,20 +29,50 @@ const createCourseSchema = z.object({
   level: z.coerce.number().int().min(100).max(900).default(200),
   semester: z.coerce.number().int().min(1).max(3).default(1),
   termSystem: z.enum(['SEMESTER', 'TRIMESTER']).default('SEMESTER'),
+  departmentId: z.string().optional(),
+  lecturerId: z.string().optional(),
 })
 
 export async function POST(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (!user.departmentId) {
-      throw new BadRequestError('Join a department before creating courses')
+    if (user.role === 'LECTURER') {
+      throw new ForbiddenError('Only department heads can create courses')
     }
     const parsed = createCourseSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
     const { code, title, level, semester, termSystem } = parsed.data
 
+    // HoDs create within their own department; the super admin provisions
+    // courses for any department via the optional body departmentId.
+    const departmentId =
+      user.role === 'SUPERADMIN' && parsed.data.departmentId
+        ? parsed.data.departmentId
+        : user.departmentId
+    if (!departmentId) {
+      throw new BadRequestError('A department is required to create courses')
+    }
+
+    // The creator is the default lecturer; a HoD / the super admin can
+    // assign any staff member of the target department instead.
+    let lecturerId = user.id
+    if (parsed.data.lecturerId && parsed.data.lecturerId !== user.id) {
+      const lecturer = await db.user.findFirst({
+        where: {
+          id: parsed.data.lecturerId,
+          departmentId,
+          role: { in: ['LECTURER', 'ADMIN'] },
+        },
+        select: { id: true },
+      })
+      if (!lecturer) {
+        throw new BadRequestError('Assigned lecturer must belong to this department')
+      }
+      lecturerId = parsed.data.lecturerId
+    }
+
     const existing = await db.course.findUnique({
-      where: { code_departmentId: { code, departmentId: user.departmentId } },
+      where: { code_departmentId: { code, departmentId } },
     })
     if (existing) {
       throw new ConflictError('A course with this code already exists in your department')
@@ -55,8 +85,8 @@ export async function POST(req: Request) {
         level,
         semester,
         termSystem,
-        departmentId: user.departmentId,
-        lecturerId: user.id,
+        departmentId,
+        lecturerId,
       },
       include: courseCountInclude,
     })

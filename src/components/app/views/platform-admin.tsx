@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import {
@@ -8,6 +8,7 @@ import {
   Building2,
   CheckCircle2,
   ChevronRight,
+  Copy,
   Database,
   ExternalLink,
   Filter,
@@ -15,6 +16,7 @@ import {
   GraduationCap,
   KeyRound,
   Layers,
+  Loader2,
   Mail,
   MoreVertical,
   Plus,
@@ -38,7 +40,9 @@ import {
   Zap,
 } from 'lucide-react'
 import type {
+  AccessCode,
   Department,
+  EnrollmentSubmission,
   Institution,
   InstitutionInput,
   PlatformInstitutionsResponse,
@@ -80,6 +84,8 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Textarea } from '@/components/ui/textarea'
 import {
   PageHeader,
   StatCard,
@@ -123,7 +129,7 @@ const ROLE_BADGES: Record<Role, { label: string; className: string }> = {
 }
 
 export default function PlatformAdminView() {
-  const { user, navigate } = useAppStore()
+  const { user, navigate, params } = useAppStore()
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -160,6 +166,39 @@ export default function PlatformAdminView() {
   const [logsOpen, setLogsOpen] = useState(false)
   const [logs, setLogs] = useState<any[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
+
+  // Deep-link support: home quick links open a specific tab…
+  const [activeTab, setActiveTab] = useState(() =>
+    params.tab === 'departments' || params.tab === 'users' || params.tab === 'policies'
+      ? params.tab
+      : 'institutions'
+  )
+
+  // ---------- Department manage drawer (platform dept tooling) ----------
+  const [manageDept, setManageDept] = useState<Department | null>(null)
+  const [managedStaff, setManagedStaff] = useState<
+    { id: string; name: string; title: string | null; role: string }[]
+  >([])
+  const [inviteName, setInviteName] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviting, setInviting] = useState(false)
+  const [inviteResult, setInviteResult] = useState<{ code: string; emailed: boolean } | null>(null)
+  const [courseCode, setCourseCode] = useState('')
+  const [courseTitle, setCourseTitle] = useState('')
+  const [courseLevel, setCourseLevel] = useState('200')
+  const [courseTerm, setCourseTerm] = useState('S1')
+  const [courseLecturerId, setCourseLecturerId] = useState('')
+  const [creatingCourse, setCreatingCourse] = useState(false)
+  const [bulkCsv, setBulkCsv] = useState('')
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [studentId, setStudentId] = useState('')
+  const [studentFirst, setStudentFirst] = useState('')
+  const [studentLast, setStudentLast] = useState('')
+  const [studentLevel, setStudentLevel] = useState('100')
+  const [enrollingStudent, setEnrollingStudent] = useState(false)
+  const [managedSubs, setManagedSubs] = useState<EnrollmentSubmission[] | null>(null)
+  const [loadingManagedSubs, setLoadingManagedSubs] = useState(false)
+  const [reviewingSubId, setReviewingSubId] = useState<string | null>(null)
 
   // User modals state
   const [addUserOpen, setAddUserOpen] = useState(false)
@@ -228,6 +267,19 @@ export default function PlatformAdminView() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // …and straight into the Provision / Outbox Audit dialogs.
+  useEffect(() => {
+    if (params.provision === '1') setCreateOpen(true)
+    if (params.openLogs === '1') {
+      setLogsOpen(true)
+      setLoadingLogs(true)
+      api<{ logs: any[] }>('/api/platform/logs')
+        .then((res) => setLogs(res.logs))
+        .catch((e: unknown) => toast.error(getErrorMessage(e)))
+        .finally(() => setLoadingLogs(false))
+    }
+  }, [params.openLogs, params.provision])
 
   // Filtered institutions
   const filteredInstitutions = useMemo(() => {
@@ -314,6 +366,232 @@ export default function PlatformAdminView() {
       toast.error(getErrorMessage(e))
     }
   }
+
+  // ---------- Manage drawer actions ----------
+  const openManageDrawer = (d: Department) => {
+    setManageDept(d)
+    setInviteResult(null)
+    setInviteName('')
+    setInviteEmail('')
+    setCourseCode('')
+    setCourseTitle('')
+    setCourseLevel('200')
+    setCourseTerm('S1')
+    setCourseLecturerId('')
+    setBulkCsv('')
+    setStudentId('')
+    setStudentFirst('')
+    setStudentLast('')
+    setStudentLevel('100')
+    setManagedSubs(null)
+    // Remember the department context so home quick links land here.
+    try {
+      localStorage.setItem('prezaro.platformDept.v1', JSON.stringify({ id: d.id, name: d.name }))
+    } catch {
+      // ignore
+    }
+  }
+
+  // Staff of the managed department — powers the course lecturer select.
+  useEffect(() => {
+    if (!manageDept) return
+    let cancelled = false
+    setManagedStaff([])
+    setCourseLecturerId('')
+    api<{ staff: { id: string; name: string; title: string | null; role: string }[] }>(
+      `/api/departments/staff?departmentId=${manageDept.id}`
+    )
+      .then((d) => {
+        if (!cancelled) setManagedStaff(d.staff)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [manageDept])
+
+  const handleInviteHod = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manageDept) return
+    setInviting(true)
+    try {
+      const res = await api<{ code: AccessCode }>('/api/departments/codes', {
+        method: 'POST',
+        body: {
+          role: 'ADMIN',
+          departmentId: manageDept.id,
+          designatedName: inviteName.trim() || undefined,
+          designatedEmail: inviteEmail.trim() || undefined,
+          sendEmailImmediately: Boolean(inviteEmail.trim()),
+          maxUses: 1,
+          expiresInDays: 7,
+        },
+      })
+      setInviteResult({ code: res.code.code, emailed: Boolean(inviteEmail.trim()) })
+      toast.success(`HoD invite code created for ${manageDept.name}`)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setInviting(false)
+    }
+  }
+
+  const handleCreateManagedCourse = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manageDept || !courseCode.trim() || !courseTitle.trim()) {
+      toast.error('Course code and title are required')
+      return
+    }
+    setCreatingCourse(true)
+    try {
+      await api('/api/courses', {
+        method: 'POST',
+        body: {
+          code: courseCode.trim().toUpperCase(),
+          title: courseTitle.trim(),
+          level: Number(courseLevel) || 200,
+          semester: Number(courseTerm.slice(1)) || 1,
+          termSystem: courseTerm.startsWith('T') ? 'TRIMESTER' : 'SEMESTER',
+          departmentId: manageDept.id,
+          ...(courseLecturerId ? { lecturerId: courseLecturerId } : {}),
+        },
+      })
+      toast.success(`Course ${courseCode.trim().toUpperCase()} created in ${manageDept.name}`)
+      setCourseCode('')
+      setCourseTitle('')
+      loadData(true)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setCreatingCourse(false)
+    }
+  }
+
+  const handleBulkUploadCourses = async () => {
+    if (!manageDept) return
+    const lines = bulkCsv
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    if (lines.length === 0) {
+      toast.error('Paste one course per line: CODE,Title,Level,Semester')
+      return
+    }
+    setBulkUploading(true)
+    let created = 0
+    let failed = 0
+    try {
+      for (const line of lines) {
+        const [code, title, level, semester, termSystem] = line.split(',').map((p) => p.trim())
+        if (!code || !title) {
+          failed += 1
+          continue
+        }
+        try {
+          await api('/api/courses', {
+            method: 'POST',
+            body: {
+              code: code.toUpperCase(),
+              title,
+              level: Number(level) || 200,
+              semester: Number(semester) || 1,
+              termSystem: (termSystem || '').toUpperCase() === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
+              departmentId: manageDept.id,
+            },
+          })
+          created += 1
+        } catch {
+          failed += 1
+        }
+      }
+      if (created > 0) {
+        toast.success(`Uploaded ${created} course${created === 1 ? '' : 's'} to ${manageDept.name}`)
+        setBulkCsv('')
+        loadData(true)
+      }
+      if (failed > 0) toast.error(`${failed} line${failed === 1 ? '' : 's'} failed (duplicates or invalid format)`)
+    } finally {
+      setBulkUploading(false)
+    }
+  }
+
+  const handleEnrollManagedStudent = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manageDept) return
+    if (!studentId.trim() || !studentFirst.trim() || !studentLast.trim()) {
+      toast.error('Student ID, first name, and last name are required')
+      return
+    }
+    setEnrollingStudent(true)
+    try {
+      await api('/api/students', {
+        method: 'POST',
+        body: {
+          single: {
+            studentId: studentId.trim(),
+            firstName: studentFirst.trim(),
+            lastName: studentLast.trim(),
+            level: Number(studentLevel) || 100,
+          },
+          departmentId: manageDept.id,
+        },
+      })
+      toast.success(`${studentFirst.trim()} ${studentLast.trim()} enrolled in ${manageDept.name}`)
+      setStudentId('')
+      setStudentFirst('')
+      setStudentLast('')
+      loadData(true)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setEnrollingStudent(false)
+    }
+  }
+
+  const loadManagedSubs = async () => {
+    if (!manageDept) return
+    setLoadingManagedSubs(true)
+    try {
+      const res = await api<{ submissions: EnrollmentSubmission[] }>(
+        `/api/departments/enrollment-submissions?departmentId=${manageDept.id}&status=PENDING`
+      )
+      setManagedSubs(res.submissions)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setLoadingManagedSubs(false)
+    }
+  }
+
+  const handleReviewManagedSub = async (submissionId: string, action: 'APPROVE' | 'REJECT') => {
+    setReviewingSubId(submissionId)
+    try {
+      await api('/api/departments/enrollment-submissions', {
+        method: 'PATCH',
+        body: { submissionId, action },
+      })
+      toast.success(action === 'APPROVE' ? 'Student verified and enrolled!' : 'Submission rejected')
+      setManagedSubs((prev) => (prev ?? []).filter((s) => s.id !== submissionId))
+      loadData(true)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setReviewingSubId(null)
+    }
+  }
+
+  // Home "continue managing" deep link: open the departments tab and drawer.
+  const manageParamSeen = useRef<string | null>(null)
+  useEffect(() => {
+    if (!params.manage || loading) return
+    if (manageParamSeen.current === params.manage) return
+    const target = departments.find((d) => d.id === params.manage)
+    if (target) {
+      manageParamSeen.current = params.manage
+      setActiveTab('departments')
+      openManageDrawer(target)
+    }
+  }, [params.manage, loading, departments])
 
   // Auto-generate slug from name
   const handleNameChange = (val: string) => {
@@ -533,7 +811,7 @@ export default function PlatformAdminView() {
         title="Platform Control Center"
         subtitle="Manage institutions, global users, dynamic policies, capacity quotas, and edge AI configurations."
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -559,7 +837,8 @@ export default function PlatformAdminView() {
               className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
             >
               <Plus className="h-3.5 w-3.5" />
-              Provision Institution
+              <span className="hidden sm:inline">Provision Institution</span>
+              <span className="sm:hidden">Provision</span>
             </Button>
           </div>
         }
@@ -597,35 +876,38 @@ export default function PlatformAdminView() {
         </div>
 
         {/* Main Content Tabs */}
-        <Tabs defaultValue="institutions" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
             <TabsTrigger
               value="institutions"
-              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
             >
-              <Building2 className="h-3.5 w-3.5" />
-              Institutions ({institutions.length})
+              <Building2 className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">Institutions</span>
+              <span className="shrink-0 tabular-nums opacity-80">({institutions.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="departments"
-              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
             >
-              <GraduationCap className="h-3.5 w-3.5" />
-              Departments ({departments.length})
+              <GraduationCap className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">Departments</span>
+              <span className="shrink-0 tabular-nums opacity-80">({departments.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="users"
-              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
             >
-              <Users className="h-3.5 w-3.5" />
-              Users ({platformUsers.length})
+              <Users className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">Users</span>
+              <span className="shrink-0 tabular-nums opacity-80">({platformUsers.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="policies"
-              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Policies
+              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">Policies</span>
             </TabsTrigger>
           </TabsList>
 
@@ -891,15 +1173,27 @@ export default function PlatformAdminView() {
                             </div>
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteDepartment(d)}
-                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                              title="Delete Department"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openManageDrawer(d)}
+                                className="h-8 gap-1.5 px-2 text-xs font-semibold text-primary hover:text-primary"
+                                title="Manage department"
+                              >
+                                <Settings2 className="h-3.5 w-3.5" />
+                                Manage
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteDepartment(d)}
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                title="Delete Department"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1833,6 +2127,319 @@ export default function PlatformAdminView() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ---------- DRAWER: Manage Department (platform dept tooling) ---------- */}
+      <Sheet open={manageDept !== null} onOpenChange={(open) => !open && setManageDept(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto scrollbar-thin">
+          <SheetHeader className="text-left">
+            <SheetTitle className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-primary" />
+              {manageDept?.name}
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground">
+              Invite the HoD, provision courses, enroll students, and review submissions.
+            </p>
+          </SheetHeader>
+
+          {manageDept && (
+            <div className="space-y-6 px-4 pb-8">
+              {/* --- Invite Head of Department --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Invite Head of Department
+                </h3>
+                <form onSubmit={handleInviteHod} className="space-y-2.5">
+                  <Input
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="HoD full name (optional)"
+                    className="h-10 text-sm"
+                  />
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="HoD email — sends the code by email"
+                    className="h-10 text-sm"
+                  />
+                  <Button type="submit" size="sm" disabled={inviting} className="w-full gap-1.5 font-semibold">
+                    {inviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                    Generate HoD invite code
+                  </Button>
+                </form>
+                {inviteResult && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                    <p className="text-[11px] font-semibold text-foreground">
+                      {inviteResult.emailed
+                        ? 'Code generated and emailed — it is also shown below.'
+                        : 'Share this code with the new HoD:'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-2.5 py-1.5 font-mono text-sm font-bold text-primary">
+                        {inviteResult.code}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(inviteResult.code)
+                          toast.success('Invite code copied')
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" /> Copy
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* --- Courses: create + bulk upload --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Courses
+                </h3>
+                <form onSubmit={handleCreateManagedCourse} className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      value={courseCode}
+                      onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
+                      placeholder="CS301"
+                      className="h-10 font-mono uppercase text-sm"
+                    />
+                    <Select value={courseLevel} onValueChange={setCourseLevel}>
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[100, 200, 300, 400, 500, 600].map((l) => (
+                          <SelectItem key={l} value={String(l)}>
+                            Level {l}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    value={courseTitle}
+                    onChange={(e) => setCourseTitle(e.target.value)}
+                    placeholder="Course title, e.g. Software Engineering"
+                    className="h-10 text-sm"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select value={courseTerm} onValueChange={setCourseTerm}>
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="S1">Semester 1</SelectItem>
+                        <SelectItem value="S2">Semester 2</SelectItem>
+                        <SelectItem value="T1">Trimester 1</SelectItem>
+                        <SelectItem value="T2">Trimester 2</SelectItem>
+                        <SelectItem value="T3">Trimester 3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={courseLecturerId} onValueChange={setCourseLecturerId}>
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue
+                          placeholder={managedStaff.length === 0 ? 'Loading staff…' : 'Lecturer'}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {managedStaff.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.title ? `${m.title} ${m.name}` : m.name}
+                            {m.role === 'ADMIN' ? ' (HoD)' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" size="sm" disabled={creatingCourse} className="w-full gap-1.5 font-semibold">
+                    {creatingCourse ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Create course
+                  </Button>
+                </form>
+                <Textarea
+                  rows={4}
+                  value={bulkCsv}
+                  onChange={(e) => setBulkCsv(e.target.value)}
+                  className="font-mono text-xs"
+                  placeholder={'Bulk upload — one course per line:\nCS301,Software Engineering,300,1\nCS305,Database Systems,300,2'}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleBulkUploadCourses()}
+                  disabled={bulkUploading || !bulkCsv.trim()}
+                  className="w-full gap-1.5 font-semibold"
+                >
+                  {bulkUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                  Upload listed courses
+                </Button>
+              </section>
+
+              {/* --- Enroll student manually --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Enroll student manually
+                </h3>
+                <form onSubmit={handleEnrollManagedStudent} className="space-y-2.5">
+                  <Input
+                    value={studentId}
+                    onChange={(e) => setStudentId(e.target.value)}
+                    placeholder="Student ID, e.g. PHA/0001/26"
+                    className="h-10 font-mono text-sm"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      value={studentFirst}
+                      onChange={(e) => setStudentFirst(e.target.value)}
+                      placeholder="First name"
+                      className="h-10 text-sm"
+                    />
+                    <Input
+                      value={studentLast}
+                      onChange={(e) => setStudentLast(e.target.value)}
+                      placeholder="Last name"
+                      className="h-10 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select value={studentLevel} onValueChange={setStudentLevel}>
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[100, 200, 300, 400, 500, 600].map((l) => (
+                          <SelectItem key={l} value={String(l)}>
+                            Level {l}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button type="submit" size="sm" disabled={enrollingStudent} className="h-10 gap-1.5 font-semibold">
+                      {enrollingStudent ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                      Enroll student
+                    </Button>
+                  </div>
+                </form>
+              </section>
+
+              {/* --- Student enrollment link --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Student enrollment link
+                </h3>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/enroll?dept=${manageDept.id}`}
+                    className="min-w-0 flex-1 font-mono text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 gap-1"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        `${window.location.origin}/enroll?dept=${manageDept.id}`
+                      )
+                      toast.success('Enrollment link copied')
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Students pick their courses during self-enrollment; submissions land below.
+                </p>
+              </section>
+
+              {/* --- Pending submissions --- */}
+              <section className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <Mail className="h-3.5 w-3.5" />
+                    Enrollment submissions
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void loadManagedSubs()}
+                    disabled={loadingManagedSubs}
+                    className="h-8 w-8 p-0"
+                    aria-label="Refresh submissions"
+                  >
+                    {loadingManagedSubs ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
+                {managedSubs === null ? (
+                  <Button size="sm" variant="outline" onClick={() => void loadManagedSubs()} className="w-full">
+                    View pending submissions
+                  </Button>
+                ) : managedSubs.length === 0 ? (
+                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
+                    No pending submissions.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {managedSubs.map((sub) => (
+                      <div key={sub.id} className="rounded-xl border p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-foreground">
+                              {sub.firstName} {sub.lastName}
+                            </p>
+                            <p className="font-mono text-[10px] text-muted-foreground">
+                              {sub.studentId} · Level {sub.level} · {sub.descriptorsCount} face samples
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="shrink-0 border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-400">
+                            PENDING
+                          </Badge>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            disabled={reviewingSubId === sub.id}
+                            onClick={() => void handleReviewManagedSub(sub.id, 'APPROVE')}
+                            className="h-8 flex-1 gap-1 text-xs font-semibold"
+                          >
+                            {reviewingSubId === sub.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            )}
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={reviewingSubId === sub.id}
+                            onClick={() => void handleReviewManagedSub(sub.id, 'REJECT')}
+                            className="h-8 flex-1 text-xs font-semibold text-destructive hover:text-destructive"
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
