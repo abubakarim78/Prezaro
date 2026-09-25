@@ -599,19 +599,31 @@ export default function PlatformAdminView() {
         {/* Main Content Tabs */}
         <Tabs defaultValue="institutions" className="w-full">
           <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
-            <TabsTrigger value="institutions" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
+            <TabsTrigger
+              value="institutions"
+              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+            >
               <Building2 className="h-3.5 w-3.5" />
               Institutions ({institutions.length})
             </TabsTrigger>
-            <TabsTrigger value="departments" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
+            <TabsTrigger
+              value="departments"
+              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+            >
               <GraduationCap className="h-3.5 w-3.5" />
               Departments ({departments.length})
             </TabsTrigger>
-            <TabsTrigger value="users" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
+            <TabsTrigger
+              value="users"
+              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+            >
               <Users className="h-3.5 w-3.5" />
               Users ({platformUsers.length})
             </TabsTrigger>
-            <TabsTrigger value="policies" className="gap-1.5 shrink-0 text-xs whitespace-nowrap">
+            <TabsTrigger
+              value="policies"
+              className="gap-1.5 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+            >
               <SlidersHorizontal className="h-3.5 w-3.5" />
               Policies
             </TabsTrigger>

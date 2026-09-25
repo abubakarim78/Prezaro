@@ -107,7 +107,9 @@ export default function HomeView() {
 
   const sessions = sessionsBlock.data?.sessions ?? []
 
-  const upcomingToday = useMemo(() => {
+  // Plain IIFE (not useMemo): the body reads the wall clock (`new Date()`),
+  // which the React compiler cannot preserve as a manual memoization.
+  const upcomingToday = (() => {
     const list = schedulesBlock.data?.schedules ?? []
     const now = new Date()
     const jsDay = now.getDay()
@@ -130,7 +132,7 @@ export default function HomeView() {
       }
     }
     return null
-  }, [schedulesBlock.data])
+  })()
 
   const firstName = user?.name?.trim().split(/\s+/)[0] ?? 'there'
   const lastName = user?.name?.trim().split(/\s+/).slice(-1)[0] ?? ''

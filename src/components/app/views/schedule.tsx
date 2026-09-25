@@ -692,7 +692,7 @@ export default function ScheduleView() {
 
       {/* Add / Edit Schedule Dialog */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-md rounded-2xl max-h-[90dvh] overflow-y-auto scrollbar-thin">
           <DialogHeader>
             <DialogTitle className="text-lg">
               {editingSchedule ? 'Edit Class Schedule' : 'Add Class Schedule'}

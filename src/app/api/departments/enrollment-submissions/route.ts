@@ -35,22 +35,35 @@ export async function POST(req: Request) {
     const cleanStudentId = data.studentId.toUpperCase().trim()
     const cleanEmail = data.email.toLowerCase().trim()
 
-    // 1. Guard: Check if student already exists and is face-enrolled in DB
-    const existingStudent = await db.student.findUnique({
-      where: { studentId: cleanStudentId },
+    // 1. Guard: Check if student already exists in DB (e.g. manually enrolled by lecturer)
+    const existingStudent = await db.student.findFirst({
+      where: {
+        OR: [
+          { studentId: { equals: cleanStudentId, mode: 'insensitive' } },
+          { email: { equals: cleanEmail, mode: 'insensitive' } },
+        ],
+      },
+      include: { department: true },
     })
-    if (existingStudent?.faceEnrolledAt) {
-      throw new ConflictError(
-        `Student ID ${cleanStudentId} is already fully enrolled in the attendance system with biometric face credentials. Duplicate submissions are not permitted.`
-      )
+
+    if (existingStudent) {
+      if (existingStudent.faceEnrolledAt) {
+        throw new ConflictError(
+          `Student ID ${cleanStudentId} (${cleanEmail}) is already fully enrolled in the attendance system with biometric face credentials. Duplicate registrations are not permitted.`
+        )
+      } else {
+        throw new ConflictError(
+          `Student ID ${cleanStudentId} (${cleanEmail}) has already been enrolled manually from the lecturer dashboard on the official departmental roster. You do not need to re-register.`
+        )
+      }
     }
 
     // 2. Guard: Check if student already has a pending or approved enrollment submission
     const existingSub = await db.enrollmentSubmission.findFirst({
       where: {
         OR: [
-          { studentId: cleanStudentId },
-          { email: cleanEmail },
+          { studentId: { equals: cleanStudentId, mode: 'insensitive' } },
+          { email: { equals: cleanEmail, mode: 'insensitive' } },
         ],
         status: { in: ['PENDING', 'APPROVED'] },
       },

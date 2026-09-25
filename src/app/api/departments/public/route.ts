@@ -9,18 +9,34 @@ export async function GET(req: Request) {
     const checkEmail = url.searchParams.get('checkEmail')
 
     if (checkStudentId || checkEmail) {
-      const student = checkStudentId
-        ? await db.student.findUnique({
-            where: { studentId: checkStudentId.toUpperCase().trim() },
-            include: { department: true },
-          })
-        : null
+      const student = await db.student.findFirst({
+        where: {
+          OR: [
+            ...(checkStudentId
+              ? [{ studentId: { equals: checkStudentId.toUpperCase().trim(), mode: 'insensitive' as const } }]
+              : []),
+            ...(checkEmail
+              ? [{ email: { equals: checkEmail.toLowerCase().trim(), mode: 'insensitive' as const } }]
+              : []),
+          ],
+        },
+        include: {
+          department: true,
+          enrollments: {
+            include: { course: true },
+          },
+        },
+      })
 
       const sub = await db.enrollmentSubmission.findFirst({
         where: {
           OR: [
-            ...(checkStudentId ? [{ studentId: checkStudentId.toUpperCase().trim() }] : []),
-            ...(checkEmail ? [{ email: checkEmail.toLowerCase().trim() }] : []),
+            ...(checkStudentId
+              ? [{ studentId: { equals: checkStudentId.toUpperCase().trim(), mode: 'insensitive' as const } }]
+              : []),
+            ...(checkEmail
+              ? [{ email: { equals: checkEmail.toLowerCase().trim(), mode: 'insensitive' as const } }]
+              : []),
           ],
           status: { in: ['PENDING', 'APPROVED'] },
         },
@@ -28,8 +44,14 @@ export async function GET(req: Request) {
         orderBy: { createdAt: 'desc' },
       })
 
-      const isEnrolled = !!(student?.faceEnrolledAt || sub)
+      // Any student in DB (manually added by lecturer or approved) or with an active submission is enrolled
+      const isEnrolled = !!(student || sub)
       let courseCodes: string[] = []
+
+      if (student?.enrollments && student.enrollments.length > 0) {
+        courseCodes = student.enrollments.map((e) => e.course.code)
+      }
+
       if (sub?.courseIdsJson) {
         try {
           const cIds: string[] = JSON.parse(sub.courseIdsJson)
@@ -38,20 +60,23 @@ export async function GET(req: Request) {
               where: { id: { in: cIds } },
               select: { code: true },
             })
-            courseCodes = courses.map((c) => c.code)
+            const subCodes = courses.map((c) => c.code)
+            courseCodes = Array.from(new Set([...courseCodes, ...subCodes]))
           }
         } catch {}
       }
 
       return NextResponse.json({
         alreadyEnrolled: isEnrolled,
-        status: student?.faceEnrolledAt ? 'APPROVED' : sub?.status || null,
+        status: student ? (student.faceEnrolledAt ? 'APPROVED' : 'ENROLLED') : (sub?.status || null),
         studentName: student ? `${student.firstName} ${student.lastName}` : sub ? `${sub.firstName} ${sub.lastName}` : null,
         studentId: student?.studentId || sub?.studentId || checkStudentId,
         departmentName: student?.department?.name || sub?.department?.name || null,
-        refCode: sub ? sub.id.slice(-8).toUpperCase() : null,
+        refCode: sub ? sub.id.slice(-8).toUpperCase() : (student ? `REG-${student.studentId}` : null),
         courseCodes,
-        submittedAt: sub?.createdAt || student?.faceEnrolledAt || null,
+        submittedAt: sub?.createdAt || student?.createdAt || null,
+        faceEnrolled: !!student?.faceEnrolledAt,
+        isManualStudent: !student?.faceEnrolledAt && !!student,
       })
     }
 
@@ -63,7 +88,7 @@ export async function GET(req: Request) {
           where: {
             OR: [
               { id: courseParam },
-              { code: { equals: courseParam, mode: 'insensitive' } },
+              { code: { equals: courseParam, mode: 'insensitive' as const } },
             ],
           },
           select: {

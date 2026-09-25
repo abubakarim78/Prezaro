@@ -30,7 +30,8 @@ export function InstallPwaPrompt() {
       // @ts-expect-error - iOS Safari legacy property
       window.navigator.standalone === true
 
-    setIsStandalone(standalone)
+    // defer state updates out of the synchronous effect body (react-hooks rule)
+    void Promise.resolve().then(() => setIsStandalone(standalone))
     if (standalone) return
 
     // 2. Check if previously dismissed by user
@@ -44,7 +45,7 @@ export function InstallPwaPrompt() {
     // 3. Detect iOS device
     const userAgent = window.navigator.userAgent.toLowerCase()
     const ios = /iphone|ipad|ipod/.test(userAgent) && !('MSStream' in window)
-    setIsIOS(ios)
+    void Promise.resolve().then(() => setIsIOS(ios))
 
     // 4. Handle standard Chromium beforeinstallprompt event
     const handleBeforeInstall = (e: Event) => {

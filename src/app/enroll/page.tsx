@@ -62,21 +62,41 @@ interface DepartmentItem {
   }[]
 }
 
-const POSES: { label: string; hint: string; ok: (off: number) => boolean }[] = [
+// Detection gates — mirrors the dashboard enrollment engine (enroll.tsx)
+// so the public flow is exactly as reliable: same tolerances, same
+// low-light enhancement, same live coaching feedback.
+const SIZE_MIN = 0.25 // face width ≥ 25% of frame
+const SIZE_MAX = 0.6 // face width ≤ 60% of frame
+const CENTER_BAND = 0.15 // box centre within 15–85% of frame width
+const STRAIGHT_TOL = 0.04
+const TURN_MIN = 0.04
+const TURN_MAX = 0.3
+const AUTO_CAPTURE_MS = 900 // gates must hold this long → auto capture
+const DETECT_BLIP_GAP_MS = 1500 // min gap between face-detected blips
+
+const POSES: {
+  label: string
+  hint: string
+  instruction: string
+  ok: (off: number) => boolean
+}[] = [
   {
     label: 'Look straight ahead',
-    hint: 'Face the camera directly and stay still',
-    ok: (off) => Math.abs(off) < 0.04,
+    hint: 'Face the camera directly and hold still',
+    instruction: 'Center your face in the camera',
+    ok: (off) => Math.abs(off) < STRAIGHT_TOL,
   },
   {
     label: 'Turn slightly left',
-    hint: 'Slowly turn your head slightly to your left',
-    ok: (off) => off >= 0.04 && off <= 0.3,
+    hint: 'A small, slow turn to your left',
+    instruction: 'Turn head slightly to your left',
+    ok: (off) => off >= TURN_MIN && off <= TURN_MAX,
   },
   {
     label: 'Turn slightly right',
-    hint: 'Slowly turn your head slightly to your right',
-    ok: (off) => off <= -0.04 && off >= -0.3,
+    hint: 'A small, slow turn to your right',
+    instruction: 'Turn head slightly to your right',
+    ok: (off) => off <= -TURN_MIN && off >= -TURN_MAX,
   },
 ]
 
@@ -102,7 +122,7 @@ interface EnrollmentReceipt {
   courseCodes: string[]
   refCode: string
   submittedAt: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  status: 'PENDING' | 'APPROVED' | 'ENROLLED' | 'REJECTED'
 }
 
 export default function StudentEnrollPage() {
@@ -119,7 +139,6 @@ export default function StudentEnrollPage() {
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [level, setLevel] = useState<number>(100)
   const [consentGiven, setConsentGiven] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -132,9 +151,14 @@ export default function StudentEnrollPage() {
   const [capturedDescriptors, setCapturedDescriptors] = useState<number[][]>([])
   const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null)
   const [autoCaptureHold, setAutoCaptureHold] = useState(0)
+  const [poseFeedback, setPoseFeedback] = useState<string>('')
   const [engineLoading, setEngineLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submittedRefCode, setSubmittedRefCode] = useState<string | null>(null)
+
+  // Step-3 camera gate: the camera starts only from an explicit user tap —
+  // auto-start raced the render (video element not yet mounted) and stayed black.
+  const [cameraStarted, setCameraStarted] = useState(false)
 
   // Locked out receipt state (prevent multiple access)
   const [existingReceipt, setExistingReceipt] = useState<EnrollmentReceipt | null>(null)
@@ -146,7 +170,14 @@ export default function StudentEnrollPage() {
   const streamRef = useRef<MediaStream | null>(null)
   const loopRef = useRef<number | null>(null)
   const holdStartRef = useRef<number | null>(null)
+  const lastValidPoseAtRef = useRef<number>(0)
+  const latestFaceResultRef = useRef<FaceResult | null>(null)
   const faceApiRef = useRef<FaceApi | null>(null)
+  // The rAF loop closes over refs, not state — a state-closure froze pose
+  // advancement on the straight pose and made side poses impossible to pass.
+  const poseIdxRef = useRef(0)
+  const hadFaceRef = useRef(false)
+  const lastBlipAtRef = useRef(0)
 
   // Check for existing enrollment on this device on mount
   useEffect(() => {
@@ -216,7 +247,6 @@ export default function StudentEnrollPage() {
           setTargetCourse(data.targetCourse)
           setSelectedDeptId(data.targetCourse.departmentId)
           setSelectedCourseIds([data.targetCourse.id])
-          if (data.targetCourse.level) setLevel(data.targetCourse.level)
         } else if (data.departments && data.departments.length > 0) {
           const found = data.departments.find(
             (d: DepartmentItem) => d.id === deptParam || d.code.toLowerCase() === deptParam?.toLowerCase()
@@ -237,8 +267,18 @@ export default function StudentEnrollPage() {
 
   const currentDept = departments.find((d) => d.id === selectedDeptId)
 
-  // Filter courses by selected level if applicable
-  const availableCourses = currentDept?.courses ?? []
+  // When enrolling through a course link, only courses at the SAME level as
+  // the wrapped course are offered — students join their own cohort only.
+  const availableCourses = currentDept
+    ? targetCourse
+      ? currentDept.courses.filter((c) => c.level === targetCourse.level)
+      : currentDept.courses
+    : []
+
+  const selectedCourses = availableCourses.filter((c) => selectedCourseIds.includes(c.id))
+  // Level is locked — derived from the wrapped course (or first selected
+  // course) and never editable on this form.
+  const effectiveLevel = targetCourse?.level ?? selectedCourses[0]?.level ?? 100
 
   const toggleCourse = (id: string) => {
     if (targetCourse && id === targetCourse.id) {
@@ -317,15 +357,73 @@ export default function StudentEnrollPage() {
     }
   }
 
-  const proceedToCapture = async () => {
+  // Live duplicate check while filling the form: as soon as a Student ID or
+  // email that already exists (manually enrolled from the lecturer dashboard,
+  // previously submitted, or fully approved) is typed, lock the page with the
+  // existing-enrollment receipt instead of letting the student finish the form.
+  useEffect(() => {
+    if (step !== 'details') return
+    const sid = studentId.trim()
+    const mail = email.trim()
+    if (sid.length < 3 && !mail.includes('@')) return
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams()
+        if (sid.length >= 3) params.set('checkStudentId', sid)
+        if (mail.includes('@')) params.set('checkEmail', mail)
+        const res = await fetch(`/api/departments/public?${params.toString()}`, {
+          signal: controller.signal,
+        })
+        const data = await res.json()
+        if (data.alreadyEnrolled) {
+          const receipt: EnrollmentReceipt = {
+            studentId: data.studentId || sid.toUpperCase(),
+            firstName: data.studentName ? data.studentName.split(' ')[0] : firstName.trim(),
+            lastName: data.studentName
+              ? data.studentName.split(' ').slice(1).join(' ')
+              : lastName.trim(),
+            email: mail.toLowerCase(),
+            departmentName: data.departmentName || currentDept?.name || 'Academic Department',
+            courseCodes: data.courseCodes || [],
+            refCode: data.refCode || 'REGISTERED',
+            submittedAt: data.submittedAt || new Date().toISOString(),
+            status: data.status || 'PENDING',
+          }
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('prezaro_enrollment_receipt', JSON.stringify(receipt))
+          }
+          setExistingReceipt(receipt)
+        }
+      } catch {
+        // aborted / offline — the Continue click re-checks before consent
+      }
+    }, 600)
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
+  }, [studentId, email, step])
+
+  const proceedToCapture = () => {
     if (!consentGiven) {
       toast.error('You must give consent to enroll for attendance verification')
       return
     }
     unlockCaptureAudio()
+    setCameraStarted(false)
     setStep('capture')
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    await initCamera()
+  }
+
+  // Explicit user gesture starts the engine + camera. The old auto-start ran
+  // before React mounted the step-3 <video>, so the camera stayed black until
+  // "Switch Camera" was tapped. Starting from this tap guarantees the video
+  // element exists (and unlocks capture audio on mobile autoplay policies).
+  const startFaceEnrollment = () => {
+    unlockCaptureAudio()
+    setCameraStarted(true)
+    void initCamera()
   }
 
   // Camera management
@@ -403,7 +501,10 @@ export default function StudentEnrollPage() {
       if (timestamp - lastDetect >= 120) {
         lastDetect = timestamp
         try {
-          const result = await detectSingle(apiObj, video)
+          // Low-light lift — detect on the enhanced canvas when the room is
+          // dim (same adaptive pipeline the dashboard enrollment uses).
+          const { source } = enhanceForDetection(video)
+          const result = await detectSingle(apiObj, source)
           if (canvas) {
             if (result) {
               drawOverlay(canvas, video, [result], [null], { mirror: facingMode === 'user' })
@@ -413,36 +514,56 @@ export default function StudentEnrollPage() {
             }
           }
 
-          if (result && poseIdx < POSES.length) {
-            const currentPose = POSES[poseIdx]
+          // Read the active pose through the ref — the rAF closure would
+          // otherwise see a stale poseIdx and never advance past pose 1.
+          const poseIdxNow = poseIdxRef.current
+
+          // "we see you" blip on face (re)acquisition
+          if (result && !hadFaceRef.current && Date.now() - lastBlipAtRef.current > DETECT_BLIP_GAP_MS) {
+            lastBlipAtRef.current = Date.now()
+            playFaceDetected()
+          }
+          hadFaceRef.current = !!result
+
+          if (result && poseIdxNow < POSES.length) {
+            const currentPose = POSES[poseIdxNow]
             const off = noseOffset(result)
-            const isPoseValid = currentPose.ok(off)
+            const vw = video.videoWidth || 1
+            const sizeOk =
+              result.box.width >= SIZE_MIN * vw && result.box.width <= SIZE_MAX * vw
+            const centerX = result.box.x + result.box.width / 2
+            const centered = centerX >= CENTER_BAND * vw && centerX <= (1 - CENTER_BAND) * vw
+            const angleOk = currentPose.ok(off)
+            const isPoseValid = sizeOk && centered && angleOk
 
             if (isPoseValid) {
+              setPoseFeedback('')
               if (holdStartRef.current === null) {
                 holdStartRef.current = timestamp
               }
               const held = timestamp - holdStartRef.current
-              const progress = Math.min(1, held / 800)
+              const progress = Math.min(1, held / AUTO_CAPTURE_MS)
               setAutoCaptureHold(progress)
 
               if (progress >= 1) {
                 // Pose achieved!
                 playPoseCaptured()
+                navigator.vibrate?.(40)
                 holdStartRef.current = null
                 setAutoCaptureHold(0)
 
                 const thumb = extractThumbnail(video, result.box)
                 const descArray = Array.from(result.descriptor)
 
-                if (poseIdx === 0) {
+                if (poseIdxNow === 0) {
                   setPrimaryPhotoData(thumb)
                 }
 
                 setCapturedPoses((prev) => [...prev, { label: currentPose.label, thumb }])
                 setCapturedDescriptors((prev) => [...prev, descArray])
 
-                const nextPose = poseIdx + 1
+                const nextPose = poseIdxNow + 1
+                poseIdxRef.current = nextPose
                 setPoseIdx(nextPose)
 
                 if (nextPose >= POSES.length) {
@@ -453,6 +574,21 @@ export default function StudentEnrollPage() {
                 }
               }
             } else {
+              // Live coaching — tell the student exactly how to adjust so
+              // side poses register on the first try.
+              if (!sizeOk) {
+                setPoseFeedback(
+                  result.box.width < SIZE_MIN * vw ? 'Move a little closer' : 'Move back a little'
+                )
+              } else if (!centered) {
+                setPoseFeedback('Center your face in the frame')
+              } else if (poseIdxNow === 0) {
+                setPoseFeedback('Look straight at the camera')
+              } else if (Math.abs(off) < TURN_MIN) {
+                setPoseFeedback('Turn a little more')
+              } else {
+                setPoseFeedback('Too far — turn back slightly')
+              }
               holdStartRef.current = null
               setAutoCaptureHold(0)
             }
@@ -476,8 +612,10 @@ export default function StudentEnrollPage() {
     setCapturedPoses([])
     setCapturedDescriptors([])
     setPrimaryPhotoData(null)
+    poseIdxRef.current = 0
     setPoseIdx(0)
     setAutoCaptureHold(0)
+    setPoseFeedback('')
     await initCamera()
   }
 
@@ -499,7 +637,7 @@ export default function StudentEnrollPage() {
           lastName: lastName.trim(),
           email: email.trim(),
           phone: phone.trim() || undefined,
-          level,
+          level: effectiveLevel,
           departmentId: selectedDeptId,
           courseIds: selectedCourseIds,
           descriptors: capturedDescriptors,
@@ -615,11 +753,18 @@ export default function StudentEnrollPage() {
                   className={cn(
                     'text-[11px] font-semibold uppercase px-2.5 py-0.5',
                     existingReceipt.status === 'APPROVED' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                    existingReceipt.status === 'ENROLLED' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
                     existingReceipt.status === 'PENDING' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
                     existingReceipt.status === 'REJECTED' && 'border-destructive/30 bg-destructive/10 text-destructive'
                   )}
                 >
-                  {existingReceipt.status === 'APPROVED' ? 'Approved & Ready' : existingReceipt.status === 'PENDING' ? 'Under Department Review' : 'Rejected'}
+                  {existingReceipt.status === 'APPROVED'
+                    ? 'Approved & Ready'
+                    : existingReceipt.status === 'ENROLLED'
+                      ? 'Already on Departmental Roster'
+                      : existingReceipt.status === 'PENDING'
+                        ? 'Under Department Review'
+                        : 'Rejected'}
                 </Badge>
               </div>
 
@@ -782,17 +927,12 @@ export default function StudentEnrollPage() {
                       <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                         Level
                       </label>
-                      <select
-                        value={String(level)}
-                        onChange={(e) => setLevel(Number(e.target.value))}
-                        className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      <div
+                        className="w-full h-11 px-3 rounded-xl border bg-muted/50 flex items-center text-sm font-semibold text-foreground"
+                        title="Level is set automatically from your course"
                       >
-                        <option value="100">100</option>
-                        <option value="200">200</option>
-                        <option value="300">300</option>
-                        <option value="400">400</option>
-                        <option value="500">500+</option>
-                      </select>
+                        Level {effectiveLevel}
+                      </div>
                     </div>
                   </div>
 
@@ -1041,6 +1181,29 @@ export default function StudentEnrollPage() {
                 />
                 <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none w-full h-full" />
 
+                {/* Pre-start overlay: camera begins only from this tap so the
+                    video element is guaranteed to be mounted first */}
+                {!cameraStarted && !engineLoading && !cameraError && (
+                  <div className="absolute inset-0 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center text-white z-10 gap-4">
+                    <div className="w-16 h-16 rounded-full bg-primary/20 border-2 border-primary/60 flex items-center justify-center text-primary">
+                      <ScanFace className="h-8 w-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-bold">Ready to capture your face</h3>
+                      <p className="text-xs text-white/70 max-w-xs">
+                        You will be guided through 3 quick facial angles — straight, left, right.
+                        Find a well-lit spot and hold your phone at eye level.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={startFaceEnrollment}
+                      className="w-full max-w-xs h-12 text-sm font-semibold gap-2"
+                    >
+                      <ScanFace className="h-4 w-4" /> Start Face Enrollment
+                    </Button>
+                  </div>
+                )}
+
                 {/* Loading / Error Overlays */}
                 {engineLoading && (
                   <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-3 text-white z-10">
@@ -1066,7 +1229,7 @@ export default function StudentEnrollPage() {
                       Pose {poseIdx + 1}: {POSES[poseIdx].label}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5 font-medium">
-                      {POSES[poseIdx].hint}
+                      {poseFeedback || POSES[poseIdx].hint}
                     </p>
 
                     {/* Auto-capture progress bar */}
