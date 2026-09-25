@@ -178,6 +178,10 @@ export default function StudentEnrollPage() {
   const availableCourses = currentDept?.courses ?? []
 
   const toggleCourse = (id: string) => {
+    if (targetCourse && id === targetCourse.id) {
+      toast.info(`${targetCourse.code} is the required course for this enrollment link.`)
+      return
+    }
     setSelectedCourseIds((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     )
@@ -628,6 +632,7 @@ export default function StudentEnrollPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1 border rounded-xl bg-card">
                         {availableCourses.map((c) => {
                           const isChecked = selectedCourseIds.includes(c.id)
+                          const isTarget = targetCourse && c.id === targetCourse.id
                           return (
                             <button
                               type="button"
@@ -637,7 +642,7 @@ export default function StudentEnrollPage() {
                                 isChecked
                                   ? 'border-primary bg-primary/10 text-foreground'
                                   : 'border-border/60 hover:bg-accent/50 text-muted-foreground'
-                              }`}
+                              } ${isTarget ? 'ring-1 ring-primary/40' : ''}`}
                             >
                               <div
                                 className={`mt-0.5 w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
@@ -649,9 +654,16 @@ export default function StudentEnrollPage() {
                                 {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
                               </div>
                               <div className="min-w-0 flex-1 leading-tight">
-                                <span className="font-mono text-xs font-bold text-foreground">
-                                  {c.code}
-                                </span>
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="font-mono text-xs font-bold text-foreground">
+                                    {c.code}
+                                  </span>
+                                  {isTarget && (
+                                    <span className="text-[10px] font-semibold text-primary bg-primary/20 px-1.5 py-0.5 rounded">
+                                      Required
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-xs truncate">{c.title}</p>
                               </div>
                             </button>

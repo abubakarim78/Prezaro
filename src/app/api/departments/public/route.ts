@@ -34,8 +34,9 @@ export async function GET(req: Request) {
         })
       : null
 
+    const targetDeptId = targetCourse?.departmentId || (deptId ?? undefined)
     const departments = await db.department.findMany({
-      where: deptId ? { id: deptId } : undefined,
+      where: targetDeptId ? { id: targetDeptId } : undefined,
       select: {
         id: true,
         name: true,
