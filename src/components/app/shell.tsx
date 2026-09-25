@@ -110,7 +110,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     navigate(v)
   }
 
-  const goScan = () => navigate('scan')
+  const goScan = () => {
+    if (openSession) {
+      navigate('scan', { courseId: openSession.courseId, sessionId: openSession.id })
+    } else {
+      navigate('scan')
+    }
+  }
 
   return (
     <div className="min-h-dvh flex bg-background">

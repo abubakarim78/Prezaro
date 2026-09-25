@@ -190,7 +190,15 @@ export default function HomeView() {
                   Resume scanning to continue marking students.
                 </p>
               </div>
-              <Button className="min-h-11 shrink-0" onClick={() => navigate('scan')}>
+              <Button
+                className="min-h-11 shrink-0"
+                onClick={() =>
+                  navigate('scan', {
+                    courseId: openSession.courseId,
+                    sessionId: openSession.id,
+                  })
+                }
+              >
                 <Play className="h-4 w-4" /> Resume
               </Button>
             </motion.div>

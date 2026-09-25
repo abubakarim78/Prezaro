@@ -104,7 +104,7 @@ export default function ReviewView() {
 
       const nowISO = new Date().toISOString()
       const next: Row[] = roster.map((st) => {
-        const rec = byStudent.get(st.id)
+        const rec = byStudent.get(st.id) ?? byStudent.get(st.studentId)
         return {
           studentId: st.id,
           code: st.studentId,
@@ -117,8 +117,9 @@ export default function ReviewView() {
 
       // students not in roster but with records (defensive)
       const rosterIds = new Set(roster.map((r) => r.id))
+      const rosterCodes = new Set(roster.map((r) => r.studentId))
       for (const [sid, rec] of byStudent) {
-        if (!rosterIds.has(sid)) {
+        if (!rosterIds.has(sid) && !rosterCodes.has(sid)) {
           next.push({
             studentId: sid,
             code: rec.code ?? rec.studentId,

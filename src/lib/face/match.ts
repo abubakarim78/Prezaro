@@ -88,14 +88,14 @@ export function bestMatch(
       }
       bestDist = entryBest
       bestId = entry.id
-    } else if (entryBest < secondDist) {
+    } else if (entryBest < secondDist && entry.id !== bestId) {
       secondDist = entryBest
     }
   }
 
   if (bestId === null || bestDist > threshold) return null
-  if (margin > 0 && secondDist <= threshold && secondDist - bestDist < margin) {
-    return null // ambiguous — the same face is close to two students
+  if (margin > 0 && (secondDist - bestDist) < margin) {
+    return null // ambiguous — the same face is close to two different students
   }
   return { id: bestId, distance: bestDist }
 }

@@ -83,10 +83,10 @@ const DETECT_INTERVAL_MS = 166 // ~6 fps
 // people ~0.55+. Kiosk (one-at-a-time, higher-res detection) runs slightly tighter
 // than walkthrough to prevent impostors; both use an ambiguity margin so a
 // face that sits between two students never picks the wrong one.
-const WALKTHROUGH_THRESHOLD = 0.52
-const KIOSK_THRESHOLD = 0.48
-const MATCH_MARGIN = 0.03
-const CONSECUTIVE_FRAMES = 2
+const WALKTHROUGH_THRESHOLD = 0.45
+const KIOSK_THRESHOLD = 0.42
+const MATCH_MARGIN = 0.04
+const CONSECUTIVE_FRAMES = 3
 const SYNC_DEBOUNCE_MS = 15000
 const RECENT_MAX = 24
 
@@ -318,7 +318,8 @@ export default function ScanView() {
       if (bootToken.current !== token) return
 
       // 4. seed existing check-ins (resume case)
-      const byStudent = new Map(roster.map((r) => [r.studentId, r]))
+      const byId = new Map(roster.map((r) => [r.id, r]))
+      const byStudentId = new Map(roster.map((r) => [r.studentId, r]))
       const checkedEntryIds = new Set<string>()
       const recent: RecentChip[] = []
       const records = [...session.records].sort(
@@ -326,7 +327,7 @@ export default function ScanView() {
       )
       for (const rec of records) {
         if (rec.status === 'ABSENT') continue
-        const entry = byStudent.get(rec.studentId)
+        const entry = byId.get(rec.studentId) ?? byStudentId.get(rec.studentId)
         if (!entry) continue
         checkedEntryIds.add(entry.id)
         if (recent.length < 8) {
@@ -581,6 +582,26 @@ function LiveScreen({
   const [manualOpen, setManualOpen] = useState(false)
   const [manualQuery, setManualQuery] = useState('')
 
+  // Pause detection when modal dialogs are open or when tab is hidden
+  const pausedRef = useRef(false)
+  pausedRef.current = exitOpen || manualOpen || discarding
+
+  useEffect(() => {
+    if (initialChecked.length > 0) {
+      toast.info(`Resumed session — ${initialChecked.length} students already checked in`)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleVis = () => {
+      if (document.hidden) {
+        busyRef.current = false
+      }
+    }
+    document.addEventListener('visibilitychange', handleVis)
+    return () => document.removeEventListener('visibilitychange', handleVis)
+  }, [])
+
   const enrolledCount = useMemo(
     () => roster.filter((r) => r.descriptors && r.descriptors.length > 0).length,
     [roster]
@@ -829,8 +850,8 @@ function LiveScreen({
         seen.add(m.id)
         const hits = (hitsRef.current.get(m.id) ?? 0) + 1
         hitsRef.current.set(m.id, hits)
-        // Check in immediately if high-confidence match (< 0.46) or after consecutive frames
-        if (hits >= CONSECUTIVE_FRAMES || m.distance < 0.46) {
+        // Check in immediately if exceptionally high-confidence match (< 0.36) or after consecutive frames
+        if (hits >= CONSECUTIVE_FRAMES || m.distance < 0.36) {
           hitsRef.current.delete(m.id)
           const entry = rosterByIdRef.current.get(m.id)
           if (entry) fnRef.current.checkIn(entry, m.distance)
@@ -901,6 +922,7 @@ function LiveScreen({
 
     const tick = (t: number) => {
       raf = requestAnimationFrame(tick)
+      if (pausedRef.current || (typeof document !== 'undefined' && document.hidden)) return
       if (t - last < DETECT_INTERVAL_MS) return
       last = t
       if (busyRef.current) return
