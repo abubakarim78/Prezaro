@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { getSessionUser, requireUser } from '@/lib/auth'
-import { BadRequestError, ForbiddenError, NotFoundError, handle, readJson, zodMessage } from '../../_lib/helpers'
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError, handle, readJson, zodMessage } from '../../_lib/helpers'
 import type { EnrollmentSubmission } from '@/lib/types'
 
 const submissionSchema = z.object({
@@ -31,6 +31,40 @@ export async function POST(req: Request) {
       include: { institution: true },
     })
     if (!dept) throw new NotFoundError('Department not found')
+
+    const cleanStudentId = data.studentId.toUpperCase().trim()
+    const cleanEmail = data.email.toLowerCase().trim()
+
+    // 1. Guard: Check if student already exists and is face-enrolled in DB
+    const existingStudent = await db.student.findUnique({
+      where: { studentId: cleanStudentId },
+    })
+    if (existingStudent?.faceEnrolledAt) {
+      throw new ConflictError(
+        `Student ID ${cleanStudentId} is already fully enrolled in the attendance system with biometric face credentials. Duplicate submissions are not permitted.`
+      )
+    }
+
+    // 2. Guard: Check if student already has a pending or approved enrollment submission
+    const existingSub = await db.enrollmentSubmission.findFirst({
+      where: {
+        OR: [
+          { studentId: cleanStudentId },
+          { email: cleanEmail },
+        ],
+        status: { in: ['PENDING', 'APPROVED'] },
+      },
+    })
+    if (existingSub) {
+      if (existingSub.status === 'APPROVED') {
+        throw new ConflictError(
+          `Enrollment for Student ID ${cleanStudentId} (${cleanEmail}) has already been approved. You cannot re-submit.`
+        )
+      }
+      throw new ConflictError(
+        `An enrollment submission for Student ID ${cleanStudentId} is already pending departmental review (Reference: ${existingSub.id.slice(-8).toUpperCase()}). Multiple submissions are not allowed.`
+      )
+    }
 
     // Create submission record
     const sub = await db.enrollmentSubmission.create({

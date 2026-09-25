@@ -5,6 +5,56 @@ import { handle } from '../../_lib/helpers'
 export async function GET(req: Request) {
   return handle(async () => {
     const url = new URL(req.url)
+    const checkStudentId = url.searchParams.get('checkStudentId')
+    const checkEmail = url.searchParams.get('checkEmail')
+
+    if (checkStudentId || checkEmail) {
+      const student = checkStudentId
+        ? await db.student.findUnique({
+            where: { studentId: checkStudentId.toUpperCase().trim() },
+            include: { department: true },
+          })
+        : null
+
+      const sub = await db.enrollmentSubmission.findFirst({
+        where: {
+          OR: [
+            ...(checkStudentId ? [{ studentId: checkStudentId.toUpperCase().trim() }] : []),
+            ...(checkEmail ? [{ email: checkEmail.toLowerCase().trim() }] : []),
+          ],
+          status: { in: ['PENDING', 'APPROVED'] },
+        },
+        include: { department: true },
+        orderBy: { createdAt: 'desc' },
+      })
+
+      const isEnrolled = !!(student?.faceEnrolledAt || sub)
+      let courseCodes: string[] = []
+      if (sub?.courseIdsJson) {
+        try {
+          const cIds: string[] = JSON.parse(sub.courseIdsJson)
+          if (cIds.length > 0) {
+            const courses = await db.course.findMany({
+              where: { id: { in: cIds } },
+              select: { code: true },
+            })
+            courseCodes = courses.map((c) => c.code)
+          }
+        } catch {}
+      }
+
+      return NextResponse.json({
+        alreadyEnrolled: isEnrolled,
+        status: student?.faceEnrolledAt ? 'APPROVED' : sub?.status || null,
+        studentName: student ? `${student.firstName} ${student.lastName}` : sub ? `${sub.firstName} ${sub.lastName}` : null,
+        studentId: student?.studentId || sub?.studentId || checkStudentId,
+        departmentName: student?.department?.name || sub?.department?.name || null,
+        refCode: sub ? sub.id.slice(-8).toUpperCase() : null,
+        courseCodes,
+        submittedAt: sub?.createdAt || student?.faceEnrolledAt || null,
+      })
+    }
+
     const deptId = url.searchParams.get('deptId') || url.searchParams.get('dept')
     const courseParam = url.searchParams.get('courseId') || url.searchParams.get('course') || url.searchParams.get('courseCode')
 

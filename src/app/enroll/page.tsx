@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Info,
   Loader2,
+  Lock,
   RefreshCw,
   ScanFace,
   ShieldCheck,
@@ -29,6 +30,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { BrandLogo } from '@/components/brand/brand-logo'
+import { cn } from '@/lib/utils'
 import {
   detectSingle,
   drawOverlay,
@@ -91,6 +93,18 @@ interface TargetCourse {
   institutionName?: string
 }
 
+interface EnrollmentReceipt {
+  studentId: string
+  firstName: string
+  lastName: string
+  email: string
+  departmentName: string
+  courseCodes: string[]
+  refCode: string
+  submittedAt: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+}
+
 export default function StudentEnrollPage() {
   const [step, setStep] = useState<Step>('details')
   const [departments, setDepartments] = useState<DepartmentItem[]>([])
@@ -122,12 +136,61 @@ export default function StudentEnrollPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submittedRefCode, setSubmittedRefCode] = useState<string | null>(null)
 
+  // Locked out receipt state (prevent multiple access)
+  const [existingReceipt, setExistingReceipt] = useState<EnrollmentReceipt | null>(null)
+  const [verifyingDuplicate, setVerifyingDuplicate] = useState(false)
+  const [refreshingStatus, setRefreshingStatus] = useState(false)
+
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const loopRef = useRef<number | null>(null)
   const holdStartRef = useRef<number | null>(null)
   const faceApiRef = useRef<FaceApi | null>(null)
+
+  // Check for existing enrollment on this device on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('prezaro_enrollment_receipt')
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as EnrollmentReceipt
+          if (parsed && parsed.studentId) {
+            setExistingReceipt(parsed)
+            void checkLatestStatus(parsed.studentId)
+          }
+        } catch {}
+      }
+    }
+  }, [])
+
+  const checkLatestStatus = async (sId: string) => {
+    setRefreshingStatus(true)
+    try {
+      const res = await fetch(`/api/departments/public?checkStudentId=${encodeURIComponent(sId)}`)
+      const data = await res.json()
+      if (data.alreadyEnrolled) {
+        setExistingReceipt((prev) => {
+          if (!prev) return null
+          const updated: EnrollmentReceipt = {
+            ...prev,
+            status: data.status || prev.status,
+            departmentName: data.departmentName || prev.departmentName,
+            courseCodes: data.courseCodes && data.courseCodes.length > 0 ? data.courseCodes : prev.courseCodes,
+            refCode: data.refCode || prev.refCode,
+          }
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('prezaro_enrollment_receipt', JSON.stringify(updated))
+          }
+          return updated
+        })
+      }
+    } catch {
+      // ignore network errors
+    } finally {
+      setRefreshingStatus(false)
+    }
+  }
 
   // Fetch departments & courses (supporting direct course lookup)
   useEffect(() => {
@@ -212,10 +275,46 @@ export default function StudentEnrollPage() {
     return true
   }
 
-  const proceedToConsent = () => {
+  const proceedToConsent = async () => {
     if (!validateDetails()) return
-    setStep('consent')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setVerifyingDuplicate(true)
+    try {
+      const checkRes = await fetch(
+        `/api/departments/public?checkStudentId=${encodeURIComponent(studentId.trim())}&checkEmail=${encodeURIComponent(email.trim())}`
+      )
+      const checkData = await checkRes.json()
+      if (checkData.alreadyEnrolled) {
+        const receipt: EnrollmentReceipt = {
+          studentId: checkData.studentId || studentId.trim().toUpperCase(),
+          firstName: checkData.studentName ? checkData.studentName.split(' ')[0] : firstName.trim(),
+          lastName: checkData.studentName ? checkData.studentName.split(' ').slice(1).join(' ') : lastName.trim(),
+          email: email.trim().toLowerCase(),
+          departmentName: checkData.departmentName || currentDept?.name || 'Academic Department',
+          courseCodes: checkData.courseCodes && checkData.courseCodes.length > 0
+            ? checkData.courseCodes
+            : availableCourses.filter((c) => selectedCourseIds.includes(c.id)).map((c) => c.code),
+          refCode: checkData.refCode || 'REGISTERED',
+          submittedAt: checkData.submittedAt || new Date().toISOString(),
+          status: checkData.status || 'PENDING',
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('prezaro_enrollment_receipt', JSON.stringify(receipt))
+        }
+        setExistingReceipt(receipt)
+        toast.error('Enrollment Already Exists', {
+          description: `Student ID ${studentId} is already registered. Each student can only enroll once.`,
+        })
+        return
+      }
+      setStep('consent')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch {
+      // If network check fails, continue
+      setStep('consent')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } finally {
+      setVerifyingDuplicate(false)
+    }
   }
 
   const proceedToCapture = async () => {
@@ -414,11 +513,37 @@ export default function StudentEnrollPage() {
         throw new Error(data.message || 'Enrollment submission failed')
       }
 
-      setSubmittedRefCode(data.submissionId ? data.submissionId.slice(-8).toUpperCase() : 'SUB-OK')
+      const refCode = data.submissionId ? data.submissionId.slice(-8).toUpperCase() : 'SUB-OK'
+      setSubmittedRefCode(refCode)
+
+      const courseCodes = availableCourses
+        .filter((c) => selectedCourseIds.includes(c.id))
+        .map((c) => c.code)
+
+      const receipt: EnrollmentReceipt = {
+        studentId: studentId.trim().toUpperCase(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim().toLowerCase(),
+        departmentName: currentDept?.name || 'Academic Department',
+        courseCodes,
+        refCode,
+        submittedAt: new Date().toISOString(),
+        status: 'PENDING',
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('prezaro_enrollment_receipt', JSON.stringify(receipt))
+      }
+      setExistingReceipt(receipt)
+
       setStep('success')
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Submission failed')
+      const msg = err instanceof Error ? err.message : 'Submission failed'
+      toast.error(msg)
+      if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('pending')) {
+        void checkLatestStatus(studentId.trim().toUpperCase())
+      }
     } finally {
       setSubmitting(false)
     }
@@ -439,17 +564,129 @@ export default function StudentEnrollPage() {
             </Badge>
           </div>
           <div className="text-xs text-muted-foreground font-medium">
-            {step === 'details' && 'Step 1 of 3'}
-            {step === 'consent' && 'Step 2 of 3'}
-            {step === 'capture' && 'Step 3 of 3'}
-            {step === 'success' && 'Completed'}
+            {existingReceipt && 'Enrolled'}
+            {!existingReceipt && step === 'details' && 'Step 1 of 3'}
+            {!existingReceipt && step === 'consent' && 'Step 2 of 3'}
+            {!existingReceipt && step === 'capture' && 'Step 3 of 3'}
+            {!existingReceipt && step === 'success' && 'Completed'}
           </div>
         </div>
       </header>
 
       {/* Main Body */}
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
-        <AnimatePresence mode="wait">
+        {existingReceipt && step !== 'success' ? (
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6 text-center py-4"
+          >
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mx-auto shadow-sm">
+              <ShieldCheck className="w-8 h-8 stroke-[2.5]" />
+            </div>
+
+            <div className="space-y-1.5">
+              <Badge variant="outline" className="gap-1.5 text-xs font-semibold px-3 py-1 border-primary/30 bg-primary/5 text-primary">
+                <Lock className="w-3.5 h-3.5" />
+                Enrollment Locked (One-Time Access)
+              </Badge>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                Enrollment Already Completed
+              </h1>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                Biometric enrollment has already been recorded on this device for <strong>{existingReceipt.firstName} {existingReceipt.lastName}</strong>.
+                Students are strictly permitted a single submission.
+              </p>
+            </div>
+
+            {/* Receipt Summary Card */}
+            <Card className="p-5 text-left space-y-4 border bg-card/80 shadow-sm rounded-2xl">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Student ID / Index Number
+                  </p>
+                  <p className="font-mono text-base font-bold text-foreground">
+                    {existingReceipt.studentId}
+                  </p>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-[11px] font-semibold uppercase px-2.5 py-0.5',
+                    existingReceipt.status === 'APPROVED' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                    existingReceipt.status === 'PENDING' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+                    existingReceipt.status === 'REJECTED' && 'border-destructive/30 bg-destructive/10 text-destructive'
+                  )}
+                >
+                  {existingReceipt.status === 'APPROVED' ? 'Approved & Ready' : existingReceipt.status === 'PENDING' ? 'Under Department Review' : 'Rejected'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <p className="text-muted-foreground font-medium">Department</p>
+                  <p className="font-semibold text-foreground truncate mt-0.5">{existingReceipt.departmentName}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground font-medium">Reference Code</p>
+                  <p className="font-mono font-bold text-primary mt-0.5">{existingReceipt.refCode}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground font-medium">Submitted On</p>
+                  <p className="text-foreground mt-0.5">{new Date(existingReceipt.submittedAt).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground font-medium">Verification Method</p>
+                  <p className="text-foreground mt-0.5">3-Pose Facial Biometrics</p>
+                </div>
+              </div>
+
+              {existingReceipt.courseCodes && existingReceipt.courseCodes.length > 0 && (
+                <div className="pt-2 border-t">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                    Registered Courses
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {existingReceipt.courseCodes.map((c) => (
+                      <span
+                        key={c}
+                        className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 font-mono text-xs font-semibold text-primary"
+                      >
+                        <BookOpen className="h-3 w-3" />
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Status Refresh Action */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-xs font-semibold h-10 w-full sm:w-auto"
+                onClick={() => checkLatestStatus(existingReceipt.studentId)}
+                disabled={refreshingStatus}
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', refreshingStatus && 'animate-spin')} />
+                {refreshingStatus ? 'Checking Status...' : 'Check Verification Status'}
+              </Button>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-muted bg-muted/40 text-left text-xs text-muted-foreground space-y-1">
+              <p className="font-semibold text-foreground flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5 text-primary" /> Need to make changes?
+              </p>
+              <p>
+                To change registered courses or request a facial re-scan (e.g. for significant appearance changes), please contact your Department Head directly. Biometric profiles cannot be modified without departmental authorization.
+              </p>
+            </div>
+          </motion.div>
+        ) : (
+          <AnimatePresence mode="wait">
           {/* STEP 1: STUDENT & COURSE DETAILS */}
           {step === 'details' && (
             <motion.div
@@ -682,9 +919,18 @@ export default function StudentEnrollPage() {
 
                   <Button
                     onClick={proceedToConsent}
+                    disabled={verifyingDuplicate}
                     className="w-full h-12 text-sm font-semibold gap-2 mt-4"
                   >
-                    Continue to Consent <ArrowRight className="h-4 w-4" />
+                    {verifyingDuplicate ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Verifying Registration...
+                      </>
+                    ) : (
+                      <>
+                        Continue to Consent <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </Button>
                 </div>
               )}
@@ -954,24 +1200,16 @@ export default function StudentEnrollPage() {
                 </ul>
               </Card>
 
-              <div className="pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setStep('details')
-                    setCapturedPoses([])
-                    setCapturedDescriptors([])
-                    setPrimaryPhotoData(null)
-                    setPoseIdx(0)
-                  }}
-                  className="text-xs"
-                >
-                  Enroll Another Student
-                </Button>
+              <div className="pt-4 flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/60 px-4 py-2 rounded-full border border-border/60">
+                  <Lock className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>One-time enrollment completed. This link is now locked on this device.</span>
+                </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
+        )}
       </main>
 
       {/* Footer */}
