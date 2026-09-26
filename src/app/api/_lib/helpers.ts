@@ -85,10 +85,11 @@ export function userDTO(
   u: User & {
     department?: Department | null
     institution?: import('@prisma/client').Institution | null
+    school?: import('@prisma/client').School | null
   }
 ): UserDTO {
-  const role: 'LECTURER' | 'ADMIN' | 'SUPERADMIN' =
-    u.role === 'SUPERADMIN' ? 'SUPERADMIN' : u.role === 'ADMIN' ? 'ADMIN' : 'LECTURER'
+  const role: UserDTO['role'] =
+    u.role === 'SUPERADMIN' || u.role === 'DEAN' || u.role === 'ADMIN' ? u.role : 'LECTURER'
   return {
     id: u.id,
     email: u.email,
@@ -98,6 +99,9 @@ export function userDTO(
     onboarded: u.onboarded,
     departmentId: u.departmentId ?? null,
     departmentName: u.department?.name ?? null,
+    schoolId: u.schoolId ?? null,
+    schoolName: u.school?.name ?? null,
+    schoolCode: u.school?.code ?? null,
     institutionId: u.institutionId ?? null,
     institutionName: u.institution?.name ?? null,
     institutionSlug: u.institution?.slug ?? null,
@@ -273,6 +277,14 @@ export async function loadSessionDetail(sessionId: string): Promise<SessionDetai
 /** WHERE clause limiting courses to what the user may see. */
 export function courseScopeWhere(user: AuthUser): Prisma.CourseWhereInput {
   if (user.role === 'SUPERADMIN') return {}
+  if (user.role === 'DEAN' && user.schoolId) {
+    return {
+      OR: [
+        { lecturerId: user.id },
+        { department: { schoolId: user.schoolId } },
+      ],
+    }
+  }
   if (!user.departmentId) return { lecturerId: user.id }
   return {
     OR: [
@@ -285,6 +297,14 @@ export function courseScopeWhere(user: AuthUser): Prisma.CourseWhereInput {
 /** WHERE clause limiting sessions to what the user may see. */
 export function sessionScopeWhere(user: AuthUser): Prisma.SessionWhereInput {
   if (user.role === 'SUPERADMIN') return {}
+  if (user.role === 'DEAN' && user.schoolId) {
+    return {
+      OR: [
+        { lecturerId: user.id },
+        { course: { department: { schoolId: user.schoolId } } },
+      ],
+    }
+  }
   if (!user.departmentId) return { lecturerId: user.id }
   return {
     OR: [
@@ -316,45 +336,68 @@ export function serializeSchedule(s: any): ClassSchedule {
   }
 }
 
-/** WHERE clause limiting students to the user's department. */
+/** WHERE clause limiting students to the user's department (DEAN: whole school). */
 export function studentScopeWhere(user: AuthUser): Prisma.StudentWhereInput {
+  if (user.role === 'SUPERADMIN') return {}
+  if (user.role === 'DEAN' && user.schoolId) {
+    return { department: { schoolId: user.schoolId } }
+  }
   return { departmentId: user.departmentId }
 }
 
-/** Fetch a course the user can act on (LECTURER: owner or same dept; ADMIN: same dept). */
+/** Fetch a course the user can act on (LECTURER: owner or same dept; DEAN: same school; ADMIN: same dept). */
 export async function requireCourse(user: AuthUser, courseId: string): Promise<Course> {
-  const course = await db.course.findUnique({ where: { id: courseId } })
+  const course = await db.course.findUnique({
+    where: { id: courseId },
+    include: { department: { select: { schoolId: true } } },
+  })
   if (!course) throw new NotFoundError('Course not found')
   const allowed =
     user.role === 'SUPERADMIN' ||
+    (user.role === 'DEAN' &&
+      user.schoolId &&
+      course.department.schoolId === user.schoolId) ||
     (user.departmentId && course.departmentId === user.departmentId) ||
     course.lecturerId === user.id
   if (!allowed) throw new ForbiddenError('You do not have access to this course')
   return course
 }
 
-/** Fetch a session the user can act on (LECTURER: owner or same dept; ADMIN: same dept as course). */
+/** Fetch a session the user can act on (LECTURER: owner or same dept; DEAN: same school; ADMIN: same dept as course). */
 export async function requireSession(
   user: AuthUser,
   sessionId: string,
 ): Promise<Session & { course: Course }> {
   const session = await db.session.findUnique({
     where: { id: sessionId },
-    include: { course: true },
+    include: {
+      course: { include: { department: { select: { schoolId: true } } } },
+    },
   })
   if (!session) throw new NotFoundError('Session not found')
   const allowed =
     user.role === 'SUPERADMIN' ||
     session.lecturerId === user.id ||
+    (user.role === 'DEAN' &&
+      user.schoolId &&
+      session.course.department.schoolId === user.schoolId) ||
     (user.departmentId && session.course.departmentId === user.departmentId)
   if (!allowed) throw new ForbiddenError('You do not have access to this session')
   return session
 }
 
-/** Fetch a student visible to the user (same department). */
+/** Fetch a student visible to the user (same department; DEAN: school-wide). */
 export async function requireStudent(user: AuthUser, studentRowId: string): Promise<Student> {
-  const student = await db.student.findUnique({ where: { id: studentRowId } })
+  const student = await db.student.findUnique({
+    where: { id: studentRowId },
+    include: { department: { select: { schoolId: true } } },
+  })
   if (!student) throw new NotFoundError('Student not found')
+  if (user.role === 'SUPERADMIN') return student
+  if (user.role === 'DEAN' && user.schoolId) {
+    if (student.department?.schoolId === user.schoolId) return student
+    throw new ForbiddenError('You do not have access to this student')
+  }
   if (student.departmentId !== user.departmentId) {
     throw new ForbiddenError('You do not have access to this student')
   }

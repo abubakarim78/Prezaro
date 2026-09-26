@@ -3,7 +3,7 @@
 // Every view + API route codes against these shapes.
 // ============================================================
 
-export type Role = 'LECTURER' | 'ADMIN' | 'SUPERADMIN'
+export type Role = 'LECTURER' | 'ADMIN' | 'DEAN' | 'SUPERADMIN'
 export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
@@ -43,6 +43,7 @@ export interface Institution {
   confidenceThreshold: number
   lateGraceMinutes: number
   termSystem: TermSystem
+  currentSemester: number
   atRiskThreshold: number
   featuresJson: string
   createdAt: string
@@ -61,6 +62,8 @@ export interface Department {
   institutionId?: string | null
   institutionName?: string | null
   institutionCode?: string | null
+  schoolId?: string | null
+  schoolName?: string | null
   courseCount?: number
   userCount?: number
   studentCount?: number
@@ -77,6 +80,9 @@ export interface User {
   onboarded: boolean
   departmentId?: string | null
   departmentName?: string | null
+  schoolId?: string | null
+  schoolName?: string | null
+  schoolCode?: string | null
   institutionId?: string | null
   institutionName?: string | null
   institutionSlug?: string | null
@@ -89,11 +95,18 @@ export interface PlatformUsersResponse {
   users: User[]
 }
 
-export interface Department {
+export interface School {
   id: string
   name: string
   code: string
   institutionId?: string | null
+  institutionName?: string | null
+  institutionCode?: string | null
+  termSystem?: TermSystem
+  currentSemester?: number
+  departmentCount?: number
+  pendingCount?: number
+  createdAt?: string
 }
 
 export interface Course {
@@ -396,6 +409,7 @@ export interface InstitutionInput {
   confidenceThreshold?: number
   lateGraceMinutes?: number
   termSystem?: TermSystem
+  currentSemester?: number
   atRiskThreshold?: number
   contactEmail?: string
   contactPhone?: string
@@ -406,9 +420,11 @@ export interface InstitutionInput {
 export interface AccessCode {
   id: string
   code: string
-  role: 'LECTURER' | 'ADMIN'
-  departmentId: string
+  role: 'LECTURER' | 'ADMIN' | 'DEAN'
+  departmentId: string | null
   departmentName?: string
+  schoolId?: string | null
+  schoolName?: string | null
   maxUses: number
   usedCount: number
   status: 'ACTIVE' | 'EXHAUSTED' | 'REVOKED' | 'EXPIRED'
@@ -430,8 +446,10 @@ export interface EnrollmentSubmission {
   level: number
   departmentId: string
   departmentName?: string
+  schoolId?: string | null
+  schoolName?: string | null
   courseIds: string[]
-  courses?: { id: string; code: string; title: string }[]
+  courses?: { id: string; code: string; title: string; departmentName?: string | null }[]
   photoData?: string | null
   descriptorsCount: number
   consentGiven: boolean

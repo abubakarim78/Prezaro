@@ -19,6 +19,7 @@ import {
   CloudUpload,
   LogOut,
   Download,
+  School,
   Smartphone,
   Building2,
   Globe2,
@@ -150,18 +151,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {label}
             </button>
           ))}
-          {(user.role === 'ADMIN' || (isSuperAdmin && user.departmentId)) && (
+          {(user.role === 'ADMIN' || user.role === 'DEAN' || (isSuperAdmin && user.departmentId)) && (
             <button
-              onClick={() => navigate('admin')}
+              onClick={() => navigate(user.role === 'DEAN' ? 'school' : 'admin')}
               className={cn(
                 'w-full flex items-center gap-3 rounded-xl px-3 h-11 text-sm font-medium transition-colors',
-                view === 'admin'
+                view === 'admin' || view === 'school'
                   ? 'bg-accent text-accent-foreground'
                   : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
               )}
             >
-              <ShieldCheck className="h-[18px] w-[18px]" />
-              Department Admin
+              {user.role === 'DEAN' ? (
+                <School className="h-[18px] w-[18px]" />
+              ) : (
+                <ShieldCheck className="h-[18px] w-[18px]" />
+              )}
+              {user.role === 'DEAN' ? 'School Control' : 'Department Admin'}
             </button>
           )}
           {user.role === 'SUPERADMIN' && (
@@ -219,7 +224,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="text-sm font-medium truncate">{user.name}</p>
               <p className="text-[11px] text-muted-foreground truncate">
                 {user.title ? `${user.title} · ` : ''}
-                {user.departmentName ?? 'No department'}
+                {user.departmentName ?? user.schoolName ?? 'No department'}
               </p>
             </div>
             <DropdownMenu>
@@ -234,9 +239,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <DropdownMenuItem onClick={() => navigate('settings')}>
                   <Settings className="h-4 w-4" /> Settings
                 </DropdownMenuItem>
-                {(user.role === 'ADMIN' || user.role === 'SUPERADMIN') && (
-                  <DropdownMenuItem onClick={() => navigate('admin')}>
-                    <ShieldCheck className="h-4 w-4" /> Department Admin
+                {(user.role === 'ADMIN' || user.role === 'DEAN' || user.role === 'SUPERADMIN') && (
+                  <DropdownMenuItem onClick={() => navigate(user.role === 'DEAN' ? 'school' : 'admin')}>
+                    {user.role === 'DEAN' ? (
+                      <School className="h-4 w-4" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" />
+                    )}
+                    {user.role === 'DEAN' ? 'School Control' : 'Department Admin'}
                   </DropdownMenuItem>
                 )}
                 {user.role === 'SUPERADMIN' && (
@@ -266,7 +276,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="min-w-0 flex-1 leading-tight">
               <p className="font-semibold tracking-tight text-sm">Prezaro</p>
               <p className="text-[10px] text-muted-foreground truncate">
-                {user.departmentName ?? 'Set up your department'}
+                {user.departmentName ?? user.schoolName ?? 'Set up your department'}
               </p>
             </div>
             {(!online || pendingSync > 0) && (
@@ -369,6 +379,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 )}
                 {(user.role === 'ADMIN' || (isSuperAdmin && user.departmentId)) && (
                   <MoreItem icon={ShieldCheck} label="Department dashboard" onClick={() => navTo('admin')} />
+                )}
+                {user.role === 'DEAN' && (
+                  <MoreItem icon={School} label="School Control" onClick={() => navTo('school')} />
                 )}
                 {!isSuperAdmin && <MoreItem icon={BarChart3} label="Reports" onClick={() => navTo('reports')} />}
                 {!isSuperAdmin && <MoreItem icon={Settings} label="Settings" onClick={() => navTo('settings')} />}

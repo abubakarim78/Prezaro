@@ -35,16 +35,24 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
     const existing = await db.classSchedule.findUnique({
       where: { id },
-      include: { course: true },
+      include: {
+        course: { include: { department: { select: { schoolId: true } } } },
+      },
     })
     if (!existing) throw new NotFoundError('Schedule not found')
 
     // The teaching lecturer (schedule owner or course lecturer) can always
-    // reschedule — directly, with no approval step.
+    // reschedule — directly, with no approval step. The Dean manages
+    // schedules school-wide.
     const allowed =
       user.role === 'ADMIN'
         ? existing.course.departmentId === user.departmentId
-        : existing.lecturerId === user.id || existing.course.lecturerId === user.id
+        : user.role === 'DEAN'
+          ? (user.schoolId !== null &&
+              existing.course.department.schoolId === user.schoolId) ||
+            existing.lecturerId === user.id ||
+            existing.course.lecturerId === user.id
+          : existing.lecturerId === user.id || existing.course.lecturerId === user.id
     if (!allowed) throw new ForbiddenError('You cannot edit this schedule')
 
     const body = await readJson(req)
@@ -132,14 +140,21 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
     const existing = await db.classSchedule.findUnique({
       where: { id },
-      include: { course: true },
+      include: {
+        course: { include: { department: { select: { schoolId: true } } } },
+      },
     })
     if (!existing) throw new NotFoundError('Schedule not found')
 
     const allowed =
       user.role === 'ADMIN'
         ? existing.course.departmentId === user.departmentId
-        : existing.lecturerId === user.id || existing.course.lecturerId === user.id
+        : user.role === 'DEAN'
+          ? (user.schoolId !== null &&
+              existing.course.department.schoolId === user.schoolId) ||
+            existing.lecturerId === user.id ||
+            existing.course.lecturerId === user.id
+          : existing.lecturerId === user.id || existing.course.lecturerId === user.id
     if (!allowed) throw new ForbiddenError('You cannot delete this schedule')
 
     await db.classSchedule.delete({ where: { id } })

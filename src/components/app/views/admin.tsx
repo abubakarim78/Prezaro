@@ -12,27 +12,20 @@ import {
   YAxis,
 } from 'recharts'
 import {
-  AlertCircle,
   BarChart3,
   BookOpen,
   CalendarDays,
   Check,
   CheckCircle2,
   ChevronRight,
-  Clock,
   Copy,
-  ExternalLink,
-  Eye,
-  Info,
   KeyRound,
   Link as LinkIcon,
   Loader2,
+  Info,
   Mail,
   Plus,
   QrCode,
-  RotateCcw,
-  Search,
-  ShieldAlert,
   ShieldCheck,
   Ticket,
   Trash2,
@@ -42,10 +35,8 @@ import {
   UserPlus,
   UserX,
   Users,
-  X,
-  XCircle,
 } from 'lucide-react'
-import type { AccessCode, DepartmentReport, EnrollmentSubmission } from '@/lib/types'
+import type { AccessCode, DepartmentReport } from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -101,13 +92,7 @@ export default function AdminView() {
   const [generatingCode, setGeneratingCode] = useState(false)
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
 
-  // Student submissions state
-  const [submissions, setSubmissions] = useState<EnrollmentSubmission[]>([])
-  const [submissionsLoading, setSubmissionsLoading] = useState(false)
-  const [submissionQuery, setSubmissionQuery] = useState('')
-  const [selectedPhoto, setSelectedPhoto] = useState<{ name: string; photoData: string } | null>(null)
-  const [approvingId, setApprovingId] = useState<string | null>(null)
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  // Enrollment share-link state (submission approval moved to the Dean's office)
   const [shareLinkOpen, setShareLinkOpen] = useState(false)
   const [selectedShareCourseId, setSelectedShareCourseId] = useState<string>('all')
   const [codeSendEmailImmediately, setCodeSendEmailImmediately] = useState(true)
@@ -139,23 +124,9 @@ export default function AdminView() {
     }
   }, [])
 
-  // Load student submissions
-  const loadSubmissions = useCallback(async () => {
-    setSubmissionsLoading(true)
-    try {
-      const data = await api<{ submissions: EnrollmentSubmission[] }>('/api/departments/enrollment-submissions')
-      setSubmissions(data.submissions)
-    } catch (e) {
-      toast.error('Failed to load student submissions: ' + getErrorMessage(e))
-    } finally {
-      setSubmissionsLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
     if (activeTab === 'codes') void loadCodes()
-    if (activeTab === 'enrollments') void loadSubmissions()
-  }, [activeTab, loadCodes, loadSubmissions])
+  }, [activeTab, loadCodes])
 
   // Generate code action
   const handleGenerateCode = async () => {
@@ -233,27 +204,6 @@ export default function AdminView() {
     }
   }
 
-  // Approve student submission
-  const handleReviewSubmission = async (submissionId: string, action: 'APPROVE' | 'REJECT') => {
-    if (action === 'APPROVE') setApprovingId(submissionId)
-    else setRejectingId(submissionId)
-
-    try {
-      await api('/api/departments/enrollment-submissions', {
-        method: 'PATCH',
-        body: { submissionId, action },
-      })
-      toast.success(action === 'APPROVE' ? 'Student verified and enrolled!' : 'Submission rejected')
-      void loadSubmissions()
-      setTick((t) => t + 1)
-    } catch (e) {
-      toast.error(getErrorMessage(e))
-    } finally {
-      setApprovingId(null)
-      setRejectingId(null)
-    }
-  }
-
   // Copy helper
   const copyText = (text: string, label: string, id?: string) => {
     void navigator.clipboard.writeText(text)
@@ -284,23 +234,6 @@ export default function AdminView() {
   )
 
   const trendData = useMemo(() => report?.trend ?? [], [report])
-
-  const pendingSubmissions = useMemo(
-    () => submissions.filter((s) => s.status === 'PENDING'),
-    [submissions]
-  )
-
-  const filteredSubmissions = useMemo(() => {
-    const q = submissionQuery.trim().toLowerCase()
-    if (!q) return submissions
-    return submissions.filter(
-      (s) =>
-        s.firstName.toLowerCase().includes(q) ||
-        s.lastName.toLowerCase().includes(q) ||
-        s.studentId.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q)
-    )
-  }, [submissions, submissionQuery])
 
   const getPublicEnrollUrl = () => {
     if (typeof window === 'undefined') return '/enroll'
@@ -350,11 +283,6 @@ export default function AdminView() {
               <UserCheck className="h-4 w-4 shrink-0" />
               <span className="hidden min-w-0 truncate sm:inline">Student Self-Enroll</span>
               <span className="min-w-0 truncate sm:hidden">Enrollments</span>
-              {pendingSubmissions.length > 0 && (
-                <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                  {pendingSubmissions.length}
-                </span>
-              )}
             </TabsTrigger>
           </TabsList>
 
@@ -734,177 +662,23 @@ export default function AdminView() {
                   Students enroll themselves with 3-pose facial scans. Once approved, they appear in their course rosters.
                 </p>
               </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <Button
-                  onClick={() => setShareLinkOpen(true)}
-                  variant="outline"
-                  className="h-10 text-xs font-semibold gap-1.5 flex-1 sm:flex-initial"
-                >
-                  <QrCode className="h-4 w-4" /> Share Link
-                </Button>
-                <Button
-                  onClick={() => void loadSubmissions()}
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  title="Refresh submissions"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
-              </div>
+              <Button
+                onClick={() => setShareLinkOpen(true)}
+                variant="outline"
+                className="h-10 text-xs font-semibold gap-1.5 w-full sm:w-auto"
+              >
+                <QrCode className="h-4 w-4" /> Share Link
+              </Button>
             </div>
 
-            {/* Search filter */}
-            {submissions.length > 0 && (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={submissionQuery}
-                  onChange={(e) => setSubmissionQuery(e.target.value)}
-                  placeholder="Search submissions by student name, index number, or email…"
-                  className="pl-9 h-11 rounded-xl bg-card"
-                />
-              </div>
-            )}
-
-            {/* Submissions list */}
-            {submissionsLoading ? (
-              <LoadingBlock label="Loading enrollment submissions…" />
-            ) : filteredSubmissions.length === 0 ? (
-              <div className="rounded-2xl border bg-card p-8 text-center space-y-3">
-                <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                  <UserCheck className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="font-semibold text-sm">No pending enrollment submissions</p>
-                  <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                    Share the student enrollment link with your students. As soon as they complete their photo capture, their requests will appear here for 1-click verification.
-                  </p>
-                </div>
-                <Button onClick={() => setShareLinkOpen(true)} size="sm">
-                  Get Student Enrollment Link
-                </Button>
-              </div>
-            ) : (
-              <div className="rounded-2xl border bg-card divide-y overflow-hidden">
-                {filteredSubmissions.map((sub) => {
-                  const isPending = sub.status === 'PENDING'
-                  const isApproving = approvingId === sub.id
-                  const isRejecting = rejectingId === sub.id
-
-                  return (
-                    <div key={sub.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {/* Student photo preview */}
-                        {sub.photoData ? (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPhoto({ name: `${sub.firstName} ${sub.lastName}`, photoData: sub.photoData! })}
-                            className="relative group h-12 w-12 rounded-full overflow-hidden shrink-0 border border-primary/20 shadow-xs focus-visible:ring-2"
-                            title="Click to view full photo"
-                          >
-                            <img
-                              src={sub.photoData}
-                              alt={sub.firstName}
-                              className="h-full w-full object-cover group-hover:scale-105 transition-transform"
-                            />
-                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
-                              <Eye className="h-4 w-4" />
-                            </div>
-                          </button>
-                        ) : (
-                          <IdentityAvatar name={`${sub.firstName} ${sub.lastName}`} className="h-12 w-12" />
-                        )}
-
-                        <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold text-sm truncate">
-                              {sub.firstName} {sub.lastName}
-                            </p>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              ({sub.studentId})
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'text-[10px] uppercase font-semibold px-1.5 py-0',
-                                sub.status === 'PENDING' && 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-                                sub.status === 'APPROVED' && 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-                                sub.status === 'REJECTED' && 'border-destructive/30 bg-destructive/10 text-destructive'
-                              )}
-                            >
-                              {sub.status}
-                            </Badge>
-                          </div>
-
-                          <p className="text-xs text-muted-foreground truncate">
-                            {sub.email} • Level {sub.level} • {sub.descriptorsCount || 3} Poses Verified
-                          </p>
-
-                          {sub.courses && sub.courses.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {sub.courses.map((c) => (
-                                <span
-                                  key={c.id}
-                                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary"
-                                >
-                                  <BookOpen className="h-3 w-3" />
-                                  {c.code}
-                                  <span className="font-sans font-normal text-muted-foreground truncate max-w-[130px]">
-                                    · {c.title}
-                                  </span>
-                                </span>
-                              ))}
-                            </div>
-                          ) : sub.courseIds && sub.courseIds.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {sub.courseIds.map((cId) => (
-                                <span
-                                  key={cId}
-                                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
-                                >
-                                  {cId.slice(-6).toUpperCase()}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                        {isPending ? (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 gap-1 text-xs text-destructive hover:bg-destructive/10"
-                              onClick={() => handleReviewSubmission(sub.id, 'REJECT')}
-                              disabled={isApproving || isRejecting}
-                            >
-                              {isRejecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-                              Reject
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="h-9 gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={() => handleReviewSubmission(sub.id, 'APPROVE')}
-                              disabled={isApproving || isRejecting}
-                            >
-                              {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              Approve &amp; Enroll
-                            </Button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {sub.reviewedAt ? new Date(sub.reviewedAt).toLocaleDateString() : 'Reviewed'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            {/* Approval moved to the Dean's office / super admins */}
+            <div className="rounded-2xl border bg-card">
+              <EmptyState
+                icon={ShieldCheck}
+                title="Approval is handled by the Dean's office"
+                description="Share the enrollment link with your students; their submissions are reviewed and approved by the Dean of your school or a super administrator. Approved students appear in your course rosters automatically."
+              />
+            </div>
           </TabsContent>
         </Tabs>
       </div>
@@ -1024,30 +798,6 @@ export default function AdminView() {
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG: PHOTO ZOOM PREVIEW */}
-      <Dialog open={!!selectedPhoto} onOpenChange={(open) => !open && setSelectedPhoto(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{selectedPhoto?.name}</DialogTitle>
-            <DialogDescription>Student enrollment facial capture preview</DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-center p-2">
-            {selectedPhoto && (
-              <img
-                src={selectedPhoto.photoData}
-                alt={selectedPhoto.name}
-                className="max-h-72 w-auto rounded-2xl object-cover border shadow-md"
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="w-full" onClick={() => setSelectedPhoto(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* DIALOG: SHARE ENROLLMENT LINK */}
       <Dialog open={shareLinkOpen} onOpenChange={setShareLinkOpen}>
         <DialogContent className="max-h-[92dvh] overflow-y-auto scrollbar-thin sm:max-w-md">
@@ -1116,7 +866,7 @@ export default function AdminView() {
                 <li>Students enter their student ID, full name, and level.</li>
                 <li>The browser camera guides them through 3 face poses (center, tilt right, tilt left).</li>
                 <li>Face descriptors are computed directly on device for privacy.</li>
-                <li>Submissions appear in your queue for 1-click departmental approval.</li>
+                <li>Submissions go to the Dean's office (or a super administrator) for approval.</li>
               </ul>
             </div>
           </div>

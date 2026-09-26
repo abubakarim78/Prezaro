@@ -142,12 +142,30 @@ export async function POST(req: Request) {
     const parsed = createSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
 
-    // HoDs manage their own department's students; the super admin targets
-    // any department via the optional body departmentId.
-    const departmentId =
-      user.role === 'SUPERADMIN' && parsed.data.departmentId
-        ? parsed.data.departmentId
-        : user.departmentId
+    // HoDs manage their own department's students; the Dean targets any
+    // department within their school; the super admin targets any department
+    // via the optional body departmentId.
+    let departmentId: string | null = user.departmentId
+    if (user.role === 'SUPERADMIN' && parsed.data.departmentId) {
+      departmentId = parsed.data.departmentId
+    } else if (user.role === 'DEAN') {
+      departmentId = parsed.data.departmentId ?? null
+      if (!departmentId) {
+        throw new BadRequestError('A department is required to add students')
+      }
+      if (!user.schoolId) {
+        throw new ForbiddenError('No school is assigned to your account')
+      }
+      const dept = await db.department.findUnique({
+        where: { id: departmentId },
+        select: { schoolId: true },
+      })
+      if (!dept || dept.schoolId !== user.schoolId) {
+        throw new ForbiddenError(
+          'You can only add students to departments within your school'
+        )
+      }
+    }
     if (!departmentId) {
       throw new BadRequestError('A department is required to add students')
     }

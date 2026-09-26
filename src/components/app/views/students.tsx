@@ -23,6 +23,8 @@ import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type {
   CoursesResponse,
+  Department,
+  DepartmentsResponse,
   RosterResponse,
   StudentListItem,
   StudentsResponse,
@@ -79,7 +81,9 @@ export default function StudentsView() {
   const navigate = useAppStore((s) => s.navigate)
   // Lecturers get a read-only roster; only HoDs / the super admin add students.
   const canManage =
-    useAppStore((s) => s.user?.role === 'ADMIN' || s.user?.role === 'SUPERADMIN')
+    useAppStore(
+      (s) => s.user?.role === 'ADMIN' || s.user?.role === 'DEAN' || s.user?.role === 'SUPERADMIN'
+    )
 
   // ---- data ----
   const [students, setStudents] = useState<StudentListItem[] | null>(null)
@@ -623,6 +627,27 @@ function NewStudentDialog({
   const [phone, setPhone] = useState('')
   const [saving, setSaving] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
+  const user = useAppStore((s) => s.user)
+  const isDean = user?.role === 'DEAN'
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [departmentId, setDepartmentId] = useState('')
+
+  // A Dean has no single home department — pick the target department
+  // within their school for every new student.
+  useEffect(() => {
+    if (!open || !isDean) return
+    let cancelled = false
+    api<DepartmentsResponse>('/api/departments')
+      .then((d) => {
+        if (cancelled) return
+        setDepartments(d.departments)
+        setDepartmentId((cur) => cur || d.departments[0]?.id || '')
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [open, isDean])
 
   const reset = () => {
     setStudentId('')
@@ -644,6 +669,10 @@ function NewStudentDialog({
       setFieldError('First and last name are required')
       return
     }
+    if (isDean && !departmentId) {
+      setFieldError('Pick the department this student belongs to')
+      return
+    }
     setFieldError(null)
     setSaving(true)
     try {
@@ -658,6 +687,7 @@ function NewStudentDialog({
             email: email.trim() || undefined,
             phone: phone.trim() || undefined,
           },
+          ...(departmentId ? { departmentId } : {}),
         },
       })
       toast.success('+1 student')
@@ -754,6 +784,23 @@ function NewStudentDialog({
               className="h-11"
             />
           </div>
+          {isDean && (
+            <div className="space-y-1.5">
+              <Label htmlFor="ns-dept">Department</Label>
+              <Select value={departmentId} onValueChange={setDepartmentId}>
+                <SelectTrigger id="ns-dept" className="h-11 w-full">
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  {departments.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name} ({d.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {fieldError && (
             <p role="alert" className="text-sm font-medium text-destructive">
               {fieldError}

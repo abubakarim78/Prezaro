@@ -16,8 +16,8 @@ export async function POST(
 ) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can send access code invitations')
+    if (user.role !== 'ADMIN' && user.role !== 'DEAN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only deans, department heads and administrators can send access code invitations')
     }
 
     const { id } = await params
@@ -29,13 +29,24 @@ export async function POST(
             institution: { select: { name: true } },
           },
         },
+        school: {
+          include: {
+            institution: { select: { name: true } },
+          },
+        },
       },
     })
 
     if (!code) throw new NotFoundError('Access code not found')
 
-    if (user.role !== 'SUPERADMIN' && code.departmentId !== user.departmentId) {
-      throw new ForbiddenError('You can only send invitation codes for your own department')
+    const inScope =
+      user.role === 'SUPERADMIN' ||
+      (user.role === 'DEAN' &&
+        !!user.schoolId &&
+        (code.schoolId === user.schoolId || code.department?.schoolId === user.schoolId)) ||
+      (user.role === 'ADMIN' && code.departmentId === user.departmentId)
+    if (!inScope) {
+      throw new ForbiddenError('You can only send invitation codes within your own school or department')
     }
 
     if (code.status !== 'ACTIVE') {
@@ -52,8 +63,10 @@ export async function POST(
     }
 
     const recipientName = parsed.data.recipientName || code.designatedName || null
-    const deptName = code.department?.name || 'Academic Department'
-    const instName = code.department?.institution?.name || 'Prezaro Academic Portal'
+    // DEAN codes are school-scoped — present the school as the join target.
+    const deptName = code.department?.name || code.school?.name || 'Academic Department'
+    const instName =
+      code.department?.institution?.name || code.school?.institution?.name || 'Prezaro Academic Portal'
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof req.headers.get === 'function' && req.headers.get('origin')) || 'https://prezaro.com'
     const directLink = `${appUrl.replace(/\/+$/, '')}/?code=${code.code}`
@@ -74,7 +87,7 @@ export async function POST(
       meta: {
         codeId: code.id,
         code: code.code,
-        departmentId: code.departmentId,
+        departmentId: code.departmentId ?? '',
         sentBy: user.email,
         targetEmail,
       },

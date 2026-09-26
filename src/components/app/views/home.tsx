@@ -527,13 +527,13 @@ export default function HomeView() {
             {/* Lecturers can't create — plain navigation labels for them. */}
             <QuickAction
               icon={UserPlus}
-              label={user?.role === 'ADMIN' ? 'Add student' : 'Students'}
+              label={user?.role === 'ADMIN' || user?.role === 'DEAN' ? 'Add student' : 'Students'}
               onClick={() => navigate('students')}
             />
             <QuickAction icon={CalendarDays} label="Timetable" onClick={() => navigate('schedule')} />
             <QuickAction
               icon={BookPlus}
-              label={user?.role === 'ADMIN' ? 'New course' : 'Courses'}
+              label={user?.role === 'ADMIN' || user?.role === 'DEAN' ? 'New course' : 'Courses'}
               onClick={() => navigate('courses')}
             />
             <QuickAction icon={BarChart3} label="Reports" onClick={() => navigate('reports')} />

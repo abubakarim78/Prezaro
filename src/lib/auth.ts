@@ -6,7 +6,7 @@ import { SignJWT, jwtVerify } from 'jose'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import type { Department, Institution, User } from '@prisma/client'
+import type { Department, Institution, School, User } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
@@ -116,6 +116,7 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
 export type AuthUser = User & {
   department: Department | null
   institution?: Institution | null
+  school?: School | null
 }
 
 /** Minimal cookie parser for `req.headers.get('cookie')`. */
@@ -142,7 +143,7 @@ export async function getSessionUser(req: Request): Promise<AuthUser | null> {
     if (!payload) return null
     return await db.user.findUnique({
       where: { id: payload.sub },
-      include: { department: true, institution: true },
+      include: { department: true, institution: true, school: true },
     })
   }
   // 2) httpOnly cookie — used by the installed PWA / top-level browsing.
@@ -152,7 +153,7 @@ export async function getSessionUser(req: Request): Promise<AuthUser | null> {
   if (!payload) return null
   return await db.user.findUnique({
     where: { id: payload.sub },
-    include: { department: true, institution: true },
+    include: { department: true, institution: true, school: true },
   })
 }
 

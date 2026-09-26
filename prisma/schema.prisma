@@ -28,10 +28,27 @@ model Institution {
   termSystem          String       @default("SEMESTER") // SEMESTER | TRIMESTER | QUARTER
   atRiskThreshold     Int          @default(75) // % required attendance
   featuresJson        String       @default("{}") // Dynamic JSON flags: { allowOffline: true, requireConsent: true, notifyEmail: true, notifyPush: true }
+  currentSemester     Int          @default(1) // 1..3 per termSystem — the current term driving enrollment course filtering
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
+  schools             School[]
   departments         Department[]
   users               User[]
+}
+
+model School {
+  id            String       @id @default(cuid())
+  name          String
+  code          String
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  departments   Department[]
+  users         User[]
+  accessCodes   AccessCode[]
+  submissions   EnrollmentSubmission[]
+
+  @@unique([name, institutionId])
 }
 
 model Department {
@@ -40,6 +57,8 @@ model Department {
   code          String
   institutionId String?
   institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  schoolId      String?
+  school        School?      @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   createdAt     DateTime     @default(now())
   users         User[]
   courses       Course[]
@@ -56,11 +75,13 @@ model User {
   passwordHash  String
   name          String
   title         String?
-  role          String       @default("LECTURER") // LECTURER | ADMIN | SUPERADMIN
+  role          String       @default("LECTURER") // LECTURER | ADMIN | DEAN | SUPERADMIN
   onboarded     Boolean      @default(false)
   settingsJson  String       @default("{}")
   departmentId  String?
   department    Department?  @relation(fields: [departmentId], references: [id])
+  schoolId      String?
+  school        School?      @relation(fields: [schoolId], references: [id])
   institutionId String?
   institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
   taughtCourses Course[]     @relation("CourseLecturer")
@@ -154,9 +175,11 @@ model AttendanceRecord {
 model AccessCode {
   id              String       @id @default(cuid())
   code            String       @unique // e.g. CS-LEC-9281
-  role            String       @default("LECTURER") // LECTURER | ADMIN
-  departmentId    String
-  department      Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  role            String       @default("LECTURER") // LECTURER | ADMIN | DEAN
+  departmentId    String?
+  department      Department?  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  schoolId        String?
+  school          School?      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   maxUses         Int          @default(1)
   usedCount       Int          @default(0)
   status          String       @default("ACTIVE") // ACTIVE | EXHAUSTED | REVOKED | EXPIRED
@@ -181,6 +204,8 @@ model EnrollmentSubmission {
   level           Int         @default(100)
   departmentId    String
   department      Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  schoolId        String?
+  school          School?     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   courseIdsJson   String      @default("[]") // JSON string array of course codes/IDs
   descriptorsJson String      @default("[]")
   photoData       String?
@@ -191,6 +216,7 @@ model EnrollmentSubmission {
   reviewedAt      DateTime?
 
   @@index([departmentId, status])
+  @@index([schoolId, status])
 }
 
 // Outbox log of every notification email the system produces.

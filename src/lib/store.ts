@@ -21,6 +21,7 @@ export type ViewName =
   | 'session'
   | 'reports'
   | 'admin'
+  | 'school'
   | 'settings'
   | 'schedule'
   | 'platform'

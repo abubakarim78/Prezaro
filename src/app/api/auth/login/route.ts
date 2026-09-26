@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     const email = parsed.data.email.toLowerCase()
     const user = await db.user.findUnique({
       where: { email },
-      include: { department: true, institution: true },
+      include: { department: true, institution: true, school: true },
     })
     if (!user || !(await compare(parsed.data.password, user.passwordHash))) {
       throw new UnauthorizedError('Invalid email or password')

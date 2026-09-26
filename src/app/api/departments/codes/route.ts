@@ -9,7 +9,7 @@ import { sendAppEmail, accessCodeInvitationHtml } from '@/lib/email'
 
 function generateAccessCode(deptCode: string, role: string): string {
   const prefix = deptCode ? `${deptCode.toUpperCase().slice(0, 4)}` : 'PREZ'
-  const tag = role === 'ADMIN' ? 'HOD' : 'LEC'
+  const tag = role === 'DEAN' ? 'DEAN' : role === 'ADMIN' ? 'HOD' : 'LEC'
   const rand = randomBytes(2).toString('hex').toUpperCase()
   return `${prefix}-${tag}-${rand}`
 }
@@ -17,23 +17,34 @@ function generateAccessCode(deptCode: string, role: string): string {
 export async function GET(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can manage access codes')
+    if (user.role !== 'ADMIN' && user.role !== 'DEAN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only deans, department heads and administrators can manage access codes')
     }
 
     const url = new URL(req.url)
-    const departmentId = user.role === 'SUPERADMIN' 
-      ? url.searchParams.get('departmentId') ?? user.departmentId 
-      : user.departmentId
+    const qDepartmentId = url.searchParams.get('departmentId')
+    const qSchoolId = url.searchParams.get('schoolId')
 
-    if (!departmentId) {
-      throw new BadRequestError('Department ID is required')
+    let where: Record<string, unknown>
+    if (user.role === 'SUPERADMIN') {
+      if (qDepartmentId) where = { departmentId: qDepartmentId }
+      else if (qSchoolId) where = { OR: [{ schoolId: qSchoolId }, { department: { schoolId: qSchoolId } }] }
+      else throw new BadRequestError('Department or school ID is required')
+    } else if (user.role === 'DEAN') {
+      if (!user.schoolId) throw new BadRequestError('School ID is required')
+      // Everything minted for the dean's school: school-level codes + codes of
+      // departments inside the school.
+      where = { OR: [{ schoolId: user.schoolId }, { department: { schoolId: user.schoolId } }] }
+    } else {
+      if (!user.departmentId) throw new BadRequestError('Department ID is required')
+      where = { departmentId: user.departmentId }
     }
 
     const rawCodes = await db.accessCode.findMany({
-      where: { departmentId },
+      where,
       include: {
         department: { select: { name: true, code: true } },
+        school: { select: { name: true, code: true } },
         createdBy: { select: { name: true } },
         claimedUsers: { select: { id: true, name: true, email: true, createdAt: true } },
       },
@@ -55,6 +66,8 @@ export async function GET(req: Request) {
         role: c.role as AccessCode['role'],
         departmentId: c.departmentId,
         departmentName: c.department?.name,
+        schoolId: c.schoolId,
+        schoolName: c.school?.name ?? null,
         maxUses: c.maxUses,
         usedCount: c.usedCount,
         status,
@@ -78,7 +91,8 @@ export async function GET(req: Request) {
 
 const createCodeSchema = z.object({
   departmentId: z.string().optional(),
-  role: z.enum(['LECTURER', 'ADMIN']).default('LECTURER'),
+  schoolId: z.string().optional(),
+  role: z.enum(['LECTURER', 'ADMIN', 'DEAN']).default('LECTURER'),
   maxUses: z.number().int().min(1).max(200).default(1),
   expiresInDays: z.number().int().min(1).max(365).optional(),
   designatedEmail: z.string().email().optional().or(z.literal('')),
@@ -89,22 +103,123 @@ const createCodeSchema = z.object({
 export async function POST(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can generate access codes')
+    if (user.role !== 'ADMIN' && user.role !== 'DEAN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only deans, department heads and administrators can generate access codes')
     }
 
     const parsed = createCodeSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
+    const { role, departmentId, schoolId } = parsed.data
 
-    // Only the platform super admin mints HoD (ADMIN-role) codes —
-    // department heads invite lecturers only.
-    if (parsed.data.role === 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only the platform super admin can create HoD access codes')
+    // Invite hierarchy: SUPERADMIN mints Dean codes, Dean mints HoD codes,
+    // HoD mints lecturer codes.
+    if (role === 'DEAN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only the platform super admin can create Dean access codes')
+    }
+    if (role === 'ADMIN' && user.role !== 'SUPERADMIN' && user.role !== 'DEAN') {
+      throw new ForbiddenError('Only the platform super admin or the school dean can create HoD access codes')
     }
 
-    const targetDeptId = user.role === 'SUPERADMIN' && parsed.data.departmentId
-      ? parsed.data.departmentId
-      : user.departmentId
+    const expiresAt = parsed.data.expiresInDays
+      ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
+      : null
+
+    // ---- DEAN codes: school-scoped -------------------------------
+    if (role === 'DEAN') {
+      const targetSchoolId = user.role === 'SUPERADMIN' && schoolId ? schoolId : user.schoolId
+      if (!targetSchoolId) {
+        throw new BadRequestError('School is required to generate Dean access codes')
+      }
+      const school = await db.school.findUnique({
+        where: { id: targetSchoolId },
+        select: { id: true, code: true, name: true, institutionId: true },
+      })
+      if (!school) throw new NotFoundError('School not found')
+
+      let codeString = ''
+      let unique = false
+      let attempts = 0
+      while (!unique && attempts < 10) {
+        attempts++
+        codeString = generateAccessCode(school.code, 'DEAN')
+        const exists = await db.accessCode.findUnique({ where: { code: codeString } })
+        if (!exists) unique = true
+      }
+
+      const accessCode = await db.accessCode.create({
+        data: {
+          code: codeString,
+          role: 'DEAN',
+          departmentId: null,
+          schoolId: school.id,
+          maxUses: parsed.data.maxUses,
+          expiresAt,
+          designatedEmail: parsed.data.designatedEmail || null,
+          designatedName: parsed.data.designatedName || null,
+          createdById: user.id,
+        },
+        include: {
+          school: { select: { name: true, code: true } },
+        },
+      })
+
+      if (parsed.data.sendEmailImmediately && parsed.data.designatedEmail) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof req.headers.get === 'function' && req.headers.get('origin')) || 'https://prezaro.com'
+        const directLink = `${appUrl.replace(/\/+$/, '')}/?code=${accessCode.code}`
+        await sendAppEmail({
+          to: parsed.data.designatedEmail,
+          subject: `Prezaro Access Code: Dean of ${school.name}`,
+          html: accessCodeInvitationHtml(
+            parsed.data.designatedName || null,
+            accessCode.code,
+            'DEAN',
+            school.name,
+            'Prezaro Academic Portal',
+            expiresAt ? expiresAt.toISOString() : null,
+            directLink,
+          ),
+          type: 'ACCESS_CODE_INVITE',
+          meta: {
+            codeId: accessCode.id,
+            code: accessCode.code,
+            departmentId: '',
+            sentBy: user.email,
+          },
+        })
+      }
+
+      return NextResponse.json({
+        code: {
+          id: accessCode.id,
+          code: accessCode.code,
+          role: 'DEAN',
+          departmentId: null,
+          schoolId: accessCode.schoolId,
+          schoolName: accessCode.school?.name ?? null,
+          maxUses: accessCode.maxUses,
+          usedCount: accessCode.usedCount,
+          status: accessCode.status as AccessCode['status'],
+          expiresAt: accessCode.expiresAt ? accessCode.expiresAt.toISOString() : null,
+          designatedEmail: accessCode.designatedEmail,
+          designatedName: accessCode.designatedName,
+          createdAt: accessCode.createdAt.toISOString(),
+        },
+      }, { status: 201 })
+    }
+
+    // ---- LECTURER / ADMIN codes: department-scoped ----------------
+    let targetDeptId: string | null = null
+    if (user.role === 'SUPERADMIN') {
+      targetDeptId = departmentId ?? null
+    } else if (user.role === 'DEAN') {
+      // The dean has no department of their own: they pick one inside their school.
+      targetDeptId = departmentId ?? null
+      if (!targetDeptId) {
+        throw new BadRequestError('Department is required to generate access codes')
+      }
+    } else {
+      targetDeptId = user.departmentId
+    }
 
     if (!targetDeptId) {
       throw new BadRequestError('Department is required to generate access codes')
@@ -116,29 +231,31 @@ export async function POST(req: Request) {
         id: true,
         code: true,
         name: true,
+        schoolId: true,
         institution: { select: { name: true } },
       },
     })
     if (!dept) throw new NotFoundError('Department not found')
+
+    // A dean can only mint codes for departments inside their own school.
+    if (user.role === 'DEAN' && dept.schoolId !== user.schoolId) {
+      throw new ForbiddenError('You can only invite heads for departments within your school')
+    }
 
     let codeString = ''
     let unique = false
     let attempts = 0
     while (!unique && attempts < 10) {
       attempts++
-      codeString = generateAccessCode(dept.code, parsed.data.role)
+      codeString = generateAccessCode(dept.code, role)
       const exists = await db.accessCode.findUnique({ where: { code: codeString } })
       if (!exists) unique = true
     }
 
-    const expiresAt = parsed.data.expiresInDays
-      ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
-      : null
-
     const accessCode = await db.accessCode.create({
       data: {
         code: codeString,
-        role: parsed.data.role,
+        role,
         departmentId: dept.id,
         maxUses: parsed.data.maxUses,
         expiresAt,
@@ -160,7 +277,7 @@ export async function POST(req: Request) {
         html: accessCodeInvitationHtml(
           parsed.data.designatedName || null,
           accessCode.code,
-          parsed.data.role,
+          role,
           dept.name,
           dept.institution?.name || 'Prezaro Academic Portal',
           expiresAt ? expiresAt.toISOString() : null,
@@ -198,19 +315,28 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can revoke access codes')
+    if (user.role !== 'ADMIN' && user.role !== 'DEAN' && user.role !== 'SUPERADMIN') {
+      throw new ForbiddenError('Only deans, department heads and administrators can revoke access codes')
     }
 
     const url = new URL(req.url)
     const codeId = url.searchParams.get('id')
     if (!codeId) throw new BadRequestError('Code ID is required')
 
-    const code = await db.accessCode.findUnique({ where: { id: codeId } })
+    const code = await db.accessCode.findUnique({
+      where: { id: codeId },
+      include: { department: { select: { schoolId: true } } },
+    })
     if (!code) throw new NotFoundError('Access code not found')
 
-    if (user.role !== 'SUPERADMIN' && code.departmentId !== user.departmentId) {
-      throw new ForbiddenError('You can only revoke codes within your department')
+    const inScope =
+      user.role === 'SUPERADMIN' ||
+      (user.role === 'DEAN' &&
+        !!user.schoolId &&
+        (code.schoolId === user.schoolId || code.department?.schoolId === user.schoolId)) ||
+      (user.role === 'ADMIN' && code.departmentId === user.departmentId)
+    if (!inScope) {
+      throw new ForbiddenError('You can only revoke codes within your own school or department')
     }
 
     await db.accessCode.update({

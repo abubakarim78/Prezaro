@@ -26,6 +26,7 @@ import SessionsView from '@/components/app/views/sessions'
 import SessionView from '@/components/app/views/session'
 import ReportsView from '@/components/app/views/reports'
 import AdminView from '@/components/app/views/admin'
+import SchoolView from '@/components/app/views/school'
 import SettingsView from '@/components/app/views/settings'
 import ScheduleView from '@/components/app/views/schedule'
 import PlatformAdminView from '@/components/app/views/platform-admin'
@@ -255,6 +256,12 @@ function PrezaroInner() {
         return (
           <AppShell>
             <AdminView />
+          </AppShell>
+        )
+      case 'school':
+        return (
+          <AppShell>
+            <SchoolView />
           </AppShell>
         )
       case 'platform':

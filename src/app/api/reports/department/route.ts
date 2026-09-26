@@ -5,8 +5,9 @@ import { requireUser } from '@/lib/auth'
 import { handle, resolveThreshold } from '../../_lib/helpers'
 
 /**
- * Department-wide report for the current user's department:
- * per-course avg attendance, at-risk students, 6-week trend.
+ * Department-wide report for the current user's department (Dean:
+ * aggregated across all departments of their school): per-course avg
+ * attendance, at-risk students, 6-week trend.
  */
 export async function GET(req: Request) {
   return handle(async () => {
@@ -15,16 +16,21 @@ export async function GET(req: Request) {
       user,
       new URL(req.url).searchParams.get('threshold'),
     )
-    const departmentName = user.department?.name ?? ''
+    const deanSchoolId = user.role === 'DEAN' ? user.schoolId : null
+    const departmentName = deanSchoolId
+      ? (user.school?.name ?? '')
+      : (user.department?.name ?? '')
 
-    if (!user.departmentId) {
+    if (!user.departmentId && !deanSchoolId) {
       return NextResponse.json({
         report: { departmentName, courses: [], atRisk: [], trend: [] },
       })
     }
 
     const courses = await db.course.findMany({
-      where: { departmentId: user.departmentId },
+      where: deanSchoolId
+        ? { department: { schoolId: deanSchoolId } }
+        : { departmentId: user.departmentId! },
       include: {
         _count: { select: { enrollments: true } },
         sessions: {

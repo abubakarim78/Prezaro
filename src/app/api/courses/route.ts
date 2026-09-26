@@ -43,30 +43,63 @@ export async function POST(req: Request) {
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
     const { code, title, level, semester, termSystem } = parsed.data
 
-    // HoDs create within their own department; the super admin provisions
-    // courses for any department via the optional body departmentId.
-    const departmentId =
-      user.role === 'SUPERADMIN' && parsed.data.departmentId
-        ? parsed.data.departmentId
-        : user.departmentId
+    // HoDs create within their own department; the Dean provisions courses
+    // in any department of their school; the super admin provisions for any
+    // department via the optional body departmentId.
+    let departmentId: string | null = user.departmentId
+    if (user.role === 'SUPERADMIN' && parsed.data.departmentId) {
+      departmentId = parsed.data.departmentId
+    } else if (user.role === 'DEAN') {
+      departmentId = parsed.data.departmentId ?? null
+      if (!departmentId) {
+        throw new BadRequestError('A department is required to create courses')
+      }
+      if (!user.schoolId) {
+        throw new ForbiddenError('No school is assigned to your account')
+      }
+      const dept = await db.department.findUnique({
+        where: { id: departmentId },
+        select: { schoolId: true },
+      })
+      if (!dept || dept.schoolId !== user.schoolId) {
+        throw new ForbiddenError(
+          'You can only create courses in departments within your school'
+        )
+      }
+    }
     if (!departmentId) {
       throw new BadRequestError('A department is required to create courses')
     }
 
-    // The creator is the default lecturer; a HoD / the super admin can
-    // assign any staff member of the target department instead.
+    // The creator is the default lecturer; a HoD / the Dean / the super
+    // admin can assign a staff member of the target department instead
+    // (school-wide for a Dean).
     let lecturerId = user.id
     if (parsed.data.lecturerId && parsed.data.lecturerId !== user.id) {
-      const lecturer = await db.user.findFirst({
-        where: {
-          id: parsed.data.lecturerId,
-          departmentId,
-          role: { in: ['LECTURER', 'ADMIN'] },
-        },
-        select: { id: true },
-      })
+      const lecturer =
+        user.role === 'DEAN' && user.schoolId
+          ? await db.user.findFirst({
+              where: {
+                id: parsed.data.lecturerId,
+                role: { in: ['LECTURER', 'ADMIN'] },
+                department: { schoolId: user.schoolId },
+              },
+              select: { id: true },
+            })
+          : await db.user.findFirst({
+              where: {
+                id: parsed.data.lecturerId,
+                departmentId,
+                role: { in: ['LECTURER', 'ADMIN'] },
+              },
+              select: { id: true },
+            })
       if (!lecturer) {
-        throw new BadRequestError('Assigned lecturer must belong to this department')
+        throw new BadRequestError(
+          user.role === 'DEAN'
+            ? 'Assigned lecturer must belong to your school'
+            : 'Assigned lecturer must belong to this department'
+        )
       }
       lecturerId = parsed.data.lecturerId
     }

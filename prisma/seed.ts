@@ -54,18 +54,67 @@ async function main(): Promise<void> {
   await db.attendanceRecord.deleteMany()
   await db.session.deleteMany()
   await db.enrollment.deleteMany()
+  await db.enrollmentSubmission.deleteMany()
   await db.student.deleteMany()
+  await db.accessCode.deleteMany()
+  await db.classSchedule.deleteMany()
   await db.course.deleteMany()
   await db.user.deleteMany()
   await db.department.deleteMany()
+  await db.school.deleteMany()
+  await db.institution.deleteMany()
 
-  // ---- department ---------------------------------------------
+  // ---- institution + school layer ------------------------------
+  const institution = await db.institution.create({
+    data: {
+      name: 'University of ClassCheck',
+      code: 'UCC',
+      slug: 'classcheck',
+      termSystem: 'SEMESTER',
+      currentSemester: 1, // drives which courses /enroll lists
+    },
+  })
+  const spms = await db.school.create({
+    data: {
+      name: 'School of Physical & Mathematical Sciences',
+      code: 'SPMS',
+      institutionId: institution.id,
+    },
+  })
+
+  // ---- departments ---------------------------------------------
   const cs = await db.department.create({
-    data: { name: 'Computer Science', code: 'CS' },
+    data: {
+      name: 'Computer Science',
+      code: 'CS',
+      institutionId: institution.id,
+      schoolId: spms.id,
+    },
+  })
+  const math = await db.department.create({
+    data: {
+      name: 'Mathematics & Statistics',
+      code: 'MATH',
+      institutionId: institution.id,
+      schoolId: spms.id,
+    },
   })
 
   // ---- users ---------------------------------------------------
   const passwordHash = hashSync('classcheck', 10)
+  await db.user.create({
+    data: {
+      email: 'dean@classcheck.edu',
+      passwordHash,
+      name: 'Prof. Nana Sarpong',
+      title: 'Dean, School of Physical & Mathematical Sciences',
+      role: 'DEAN',
+      onboarded: true,
+      settingsJson: '{}',
+      institutionId: institution.id,
+      schoolId: spms.id,
+    },
+  })
   await db.user.create({
     data: {
       email: 'hod@classcheck.edu',
@@ -75,6 +124,7 @@ async function main(): Promise<void> {
       role: 'ADMIN',
       onboarded: true,
       settingsJson: '{}',
+      institutionId: institution.id,
       departmentId: cs.id,
     },
   })
@@ -87,6 +137,7 @@ async function main(): Promise<void> {
       role: 'LECTURER',
       onboarded: true,
       settingsJson: '{}',
+      institutionId: institution.id,
       departmentId: cs.id,
     },
   })
@@ -99,20 +150,25 @@ async function main(): Promise<void> {
       role: 'LECTURER',
       onboarded: true,
       settingsJson: '{}',
+      institutionId: institution.id,
       departmentId: cs.id,
     },
   })
 
   // ---- courses -------------------------------------------------
+  // MA301 lives in a DIFFERENT department of the same school (SPMS) so a
+  // single submission can mix courses across departments; CS201 (level 200)
+  // and CS402 (semester 2) demo the level/term filter on /enroll.
   const courseSpecs = [
-    { code: 'CS301', title: 'Data Structures & Algorithms', level: 300, semester: 1, lecturerId: ama.id },
-    { code: 'CS305', title: 'Database Systems', level: 300, semester: 1, lecturerId: ama.id },
-    { code: 'CS402', title: 'Computer Networks', level: 400, semester: 2, lecturerId: kwame.id },
-    { code: 'CS201', title: 'Programming Fundamentals', level: 200, semester: 1, lecturerId: kwame.id },
+    { code: 'CS301', title: 'Data Structures & Algorithms', level: 300, semester: 1, lecturerId: ama.id, departmentId: cs.id },
+    { code: 'CS305', title: 'Database Systems', level: 300, semester: 1, lecturerId: ama.id, departmentId: cs.id },
+    { code: 'CS402', title: 'Computer Networks', level: 400, semester: 2, lecturerId: kwame.id, departmentId: cs.id },
+    { code: 'CS201', title: 'Programming Fundamentals', level: 200, semester: 1, lecturerId: kwame.id, departmentId: cs.id },
+    { code: 'MA301', title: 'Linear Algebra', level: 300, semester: 1, lecturerId: kwame.id, departmentId: math.id },
   ]
   const courses: { id: string; lecturerId: string }[] = []
   for (const spec of courseSpecs) {
-    courses.push(await db.course.create({ data: { ...spec, departmentId: cs.id } }))
+    courses.push(await db.course.create({ data: { ...spec } }))
   }
 
   // ---- students (unique names, IDs) ---------------------------
@@ -164,8 +220,8 @@ async function main(): Promise<void> {
     createdStudents.push(await db.student.create({ data: s }))
   }
 
-  // ---- enrollments (CS301≈38, CS305≈30, CS402≈24, CS201≈26) ----
-  const sizes = [38, 30, 24, 26]
+  // ---- enrollments (CS301≈38, CS305≈30, CS402≈24, CS201≈26, MA301≈14) ----
+  const sizes = [38, 30, 24, 26, 14]
   const enrollmentRows: { courseId: string; studentId: string }[] = []
   courses.forEach((course, ci) => {
     const order = shuffle(createdStudents)
@@ -289,9 +345,11 @@ async function main(): Promise<void> {
       db.attendanceRecord.count(),
     ])
   console.log('Seed complete:')
-  console.log(`  departments: ${deptCount} (Computer Science / CS)`)
-  console.log(`  users:       ${userCount} (hod@classcheck.edu ADMIN, lecturer@classcheck.edu + kwame@classcheck.edu LECTURER — password "classcheck")`)
-  console.log(`  courses:     ${courseCount} (CS301, CS305, CS402, CS201)`)
+  console.log(`  institution: UCC — University of ClassCheck (currentSemester: 1)`)
+  console.log(`  school:      SPMS — School of Physical & Mathematical Sciences`)
+  console.log(`  departments: ${deptCount} (Computer Science/CS + Mathematics & Statistics/MATH, both in SPMS)`)
+  console.log(`  users:       ${userCount} (dean@classcheck.edu DEAN, hod@classcheck.edu ADMIN, lecturer@classcheck.edu + kwame@classcheck.edu LECTURER — password "classcheck")`)
+  console.log(`  courses:     ${courseCount} (CS301, CS305, CS402, CS201 in CS; MA301 in MATH)`)
   console.log(`  students:    ${studentCount}`)
   console.log(`  enrollments: ${enrollmentCount}`)
   console.log(`  sessions:    ${sessionCount} (all COMPLETED, past 28 days)`)

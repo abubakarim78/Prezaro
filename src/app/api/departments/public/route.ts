@@ -80,6 +80,77 @@ export async function GET(req: Request) {
       })
     }
 
+    // School listing for the school-first enrollment flow (public; ACTIVE institutions only).
+    if (url.searchParams.get('list') === 'schools') {
+      const schools = await db.school.findMany({
+        where: { institution: { status: 'ACTIVE' } },
+        include: {
+          institution: { select: { name: true, termSystem: true, currentSemester: true } },
+          _count: { select: { departments: true } },
+        },
+        orderBy: { name: 'asc' },
+      })
+      return NextResponse.json({
+        schools: schools.map((s) => ({
+          id: s.id,
+          name: s.name,
+          code: s.code,
+          institutionName: s.institution?.name ?? 'Prezaro Campus',
+          termSystem: s.institution?.termSystem ?? 'SEMESTER',
+          currentSemester: s.institution?.currentSemester ?? 1,
+          departmentCount: s._count.departments,
+        })),
+      })
+    }
+
+    // School-first flow: a school with all its departments and their courses.
+    const schoolParam = url.searchParams.get('school')
+    if (schoolParam) {
+      const school = await db.school.findFirst({
+        where: {
+          OR: [
+            { id: schoolParam },
+            { code: { equals: schoolParam, mode: 'insensitive' as const } },
+          ],
+        },
+        include: { institution: { select: { id: true, name: true, slug: true, termSystem: true, currentSemester: true } } },
+      })
+      if (!school) return NextResponse.json({ school: null, departments: [] })
+
+      const departments = await db.department.findMany({
+        where: { schoolId: school.id },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          courses: {
+            select: { id: true, code: true, title: true, level: true, semester: true },
+            orderBy: { code: 'asc' },
+          },
+        },
+        orderBy: { name: 'asc' },
+      })
+
+      const instName = school.institution?.name ?? 'Prezaro Campus'
+      return NextResponse.json({
+        school: {
+          id: school.id,
+          name: school.name,
+          code: school.code,
+          institutionName: instName,
+          termSystem: school.institution?.termSystem ?? 'SEMESTER',
+          currentSemester: school.institution?.currentSemester ?? 1,
+        },
+        departments: departments.map((d) => ({
+          id: d.id,
+          name: d.name,
+          code: d.code,
+          institutionName: instName,
+          courses: d.courses,
+        })),
+      })
+    }
+
     const deptId = url.searchParams.get('deptId') || url.searchParams.get('dept')
     const courseParam = url.searchParams.get('courseId') || url.searchParams.get('course') || url.searchParams.get('courseCode')
 

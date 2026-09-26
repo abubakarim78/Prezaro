@@ -59,7 +59,18 @@ interface DepartmentItem {
     code: string
     title: string
     level: number
+    semester?: number
   }[]
+}
+
+interface SchoolItem {
+  id: string
+  name: string
+  code: string
+  institutionName: string
+  termSystem: string
+  currentSemester: number
+  departmentCount: number
 }
 
 // Detection gates — mirrors the dashboard enrollment engine (enroll.tsx)
@@ -130,6 +141,16 @@ export default function StudentEnrollPage() {
   const [departments, setDepartments] = useState<DepartmentItem[]>([])
   const [loadingDepts, setLoadingDepts] = useState(true)
   const [targetCourse, setTargetCourse] = useState<TargetCourse | null>(null)
+
+  // School-first flow: the student selects a School/Faculty, then sees that
+  // school's courses filtered by their level and the institution's current term.
+  const [schools, setSchools] = useState<SchoolItem[]>([])
+  const [selectedSchoolId, setSelectedSchoolId] = useState('')
+  const [schoolInfo, setSchoolInfo] = useState<{ termSystem: string; currentSemester: number } | null>(null)
+  const [level, setLevel] = useState(100)
+  const [showOtherLevels, setShowOtherLevels] = useState(false)
+  const [isLegacyLink, setIsLegacyLink] = useState(false)
+  const [loadingSchool, setLoadingSchool] = useState(false)
 
   // Form Fields
   const [selectedDeptId, setSelectedDeptId] = useState('')
@@ -223,6 +244,41 @@ export default function StudentEnrollPage() {
     }
   }
 
+  // Load a school's full department/course catalog for the school-first flow.
+  const loadSchoolCatalog = async (schoolToken: string) => {
+    setLoadingSchool(true)
+    try {
+      const res = await fetch(`/api/departments/public?school=${encodeURIComponent(schoolToken)}`)
+      const data = await res.json()
+      if (data.school) {
+        setDepartments(data.departments ?? [])
+        setSelectedSchoolId(data.school.id)
+        setSchoolInfo({
+          termSystem: data.school.termSystem ?? 'SEMESTER',
+          currentSemester: data.school.currentSemester ?? 1,
+        })
+        setSelectedCourseIds([])
+        setSelectedDeptId('')
+      } else {
+        toast.error('That school could not be found. Please pick one from the list.')
+      }
+    } catch {
+      toast.error('Failed to load school courses')
+    } finally {
+      setLoadingSchool(false)
+    }
+  }
+
+  // Legacy fallback: all departments across the institution (deployments without schools).
+  const loadLegacyDepartments = async () => {
+    const res = await fetch('/api/departments/public')
+    const data = await res.json()
+    if (data.departments && data.departments.length > 0) {
+      setDepartments(data.departments)
+      setSelectedDeptId(data.departments[0].id)
+    }
+  }
+
   // Fetch departments & courses (supporting direct course lookup)
   useEffect(() => {
     ;(async () => {
@@ -231,31 +287,62 @@ export default function StudentEnrollPage() {
         const courseParam = urlParams.get('course') || urlParams.get('courseId') || urlParams.get('courseCode')
         const deptParam = urlParams.get('dept') || urlParams.get('deptId')
 
-        const queryParams = new URLSearchParams()
-        if (courseParam) queryParams.set('course', courseParam)
-        if (deptParam) queryParams.set('dept', deptParam)
+        if (courseParam || deptParam) {
+          // Legacy deep links keep their original behavior exactly.
+          setIsLegacyLink(true)
+          const queryParams = new URLSearchParams()
+          if (courseParam) queryParams.set('course', courseParam)
+          if (deptParam) queryParams.set('dept', deptParam)
 
-        const fetchUrl = `/api/departments/public${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
-        const res = await fetch(fetchUrl)
-        const data = await res.json()
+          const fetchUrl = `/api/departments/public${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+          const res = await fetch(fetchUrl)
+          const data = await res.json()
 
-        if (data.departments && data.departments.length > 0) {
-          setDepartments(data.departments)
+          if (data.departments && data.departments.length > 0) {
+            setDepartments(data.departments)
+          }
+
+          if (data.targetCourse) {
+            setTargetCourse(data.targetCourse)
+            setSelectedDeptId(data.targetCourse.departmentId)
+            setSelectedCourseIds([data.targetCourse.id])
+          } else if (data.departments && data.departments.length > 0) {
+            const found = data.departments.find(
+              (d: DepartmentItem) => d.id === deptParam || d.code.toLowerCase() === deptParam?.toLowerCase()
+            )
+            if (found) {
+              setSelectedDeptId(found.id)
+            } else {
+              setSelectedDeptId(data.departments[0].id)
+            }
+          }
+          return
         }
 
-        if (data.targetCourse) {
-          setTargetCourse(data.targetCourse)
-          setSelectedDeptId(data.targetCourse.departmentId)
-          setSelectedCourseIds([data.targetCourse.id])
-        } else if (data.departments && data.departments.length > 0) {
-          const found = data.departments.find(
-            (d: DepartmentItem) => d.id === deptParam || d.code.toLowerCase() === deptParam?.toLowerCase()
+        // School-first entry (plain /enroll or ?school=): list schools, then
+        // load the preselected school's catalog. With no link parameter the
+        // student picks the School/Faculty themselves.
+        const listRes = await fetch('/api/departments/public?list=schools')
+        const listData = await listRes.json()
+        const list: SchoolItem[] = Array.isArray(listData.schools) ? listData.schools : []
+        setSchools(list)
+
+        const schoolParam = urlParams.get('school')
+        if (schoolParam) {
+          const match = list.find(
+            (s) => s.id === schoolParam || s.code.toLowerCase() === schoolParam.toLowerCase()
           )
-          if (found) {
-            setSelectedDeptId(found.id)
+          if (match) {
+            setSelectedSchoolId(match.id)
+            await loadSchoolCatalog(match.id)
+          } else if (list.length > 0) {
+            await loadSchoolCatalog(schoolParam)
           } else {
-            setSelectedDeptId(data.departments[0].id)
+            await loadLegacyDepartments()
           }
+        } else if (list.length === 0) {
+          // No schools configured — fall back to the legacy all-departments picker.
+          await loadLegacyDepartments()
         }
       } catch (err) {
         toast.error('Failed to load university departments')
@@ -280,6 +367,56 @@ export default function StudentEnrollPage() {
   // course) and never editable on this form.
   const effectiveLevel = targetCourse?.level ?? selectedCourses[0]?.level ?? 100
 
+  // School-first mode: the student picks a School/Faculty and sees that
+  // school's courses filtered by their level and the current term, grouped
+  // by department across the whole school.
+  const schoolMode = !isLegacyLink && schools.length > 0
+  const currentSemester = schoolInfo?.currentSemester ?? 1
+  const termLabel =
+    schoolInfo?.termSystem === 'TRIMESTER'
+      ? 'Trimester'
+      : schoolInfo?.termSystem === 'QUARTER'
+        ? 'Quarter'
+        : 'Semester'
+
+  // Every course across the selected school with its owning department —
+  // picks can span departments, so the receipt can't rely on a single
+  // department's course list.
+  const allSchoolCourses = departments.flatMap((d) =>
+    d.courses.map((c) => ({ ...c, departmentId: d.id, departmentName: d.name }))
+  )
+  const selectedCourseObjects = schoolMode
+    ? allSchoolCourses.filter((c) => selectedCourseIds.includes(c.id))
+    : selectedCourses
+
+  const visibleSchoolDepartments = departments
+    .map((d) => ({
+      ...d,
+      courses: d.courses.filter(
+        (c) => c.semester === currentSemester && (showOtherLevels || c.level === level)
+      ),
+    }))
+    .filter((d) => d.courses.length > 0)
+
+  const handleSchoolChange = (id: string) => {
+    setSelectedSchoolId(id)
+    setSelectedCourseIds([])
+    setSelectedDeptId('')
+    setShowOtherLevels(false)
+    void loadSchoolCatalog(id)
+  }
+
+  // School-mode pick: the home department defaults to the first picked
+  // course's department and stays editable afterwards.
+  const toggleSchoolCourse = (courseId: string, deptId: string) => {
+    const next = selectedCourseIds.includes(courseId)
+      ? selectedCourseIds.filter((c) => c !== courseId)
+      : [...selectedCourseIds, courseId]
+    setSelectedCourseIds(next)
+    if (next.length === 0) setSelectedDeptId('')
+    else if (!selectedDeptId) setSelectedDeptId(deptId)
+  }
+
   const toggleCourse = (id: string) => {
     if (targetCourse && id === targetCourse.id) {
       toast.info(`${targetCourse.code} is the required course for this enrollment link.`)
@@ -292,8 +429,12 @@ export default function StudentEnrollPage() {
 
   const validateDetails = () => {
     setFormError(null)
+    if (schoolMode && !selectedSchoolId) {
+      setFormError('Please select your School / Faculty')
+      return false
+    }
     if (!selectedDeptId) {
-      setFormError('Please select your department')
+      setFormError(schoolMode ? 'Please select your home department' : 'Please select your department')
       return false
     }
     if (!studentId.trim()) {
@@ -332,7 +473,7 @@ export default function StudentEnrollPage() {
           departmentName: checkData.departmentName || currentDept?.name || 'Academic Department',
           courseCodes: checkData.courseCodes && checkData.courseCodes.length > 0
             ? checkData.courseCodes
-            : availableCourses.filter((c) => selectedCourseIds.includes(c.id)).map((c) => c.code),
+            : selectedCourseObjects.map((c) => c.code),
           refCode: checkData.refCode || 'REGISTERED',
           submittedAt: checkData.submittedAt || new Date().toISOString(),
           status: checkData.status || 'PENDING',
@@ -637,8 +778,9 @@ export default function StudentEnrollPage() {
           lastName: lastName.trim(),
           email: email.trim(),
           phone: phone.trim() || undefined,
-          level: effectiveLevel,
+          level: schoolMode ? level : effectiveLevel,
           departmentId: selectedDeptId,
+          schoolId: selectedSchoolId || undefined,
           courseIds: selectedCourseIds,
           descriptors: capturedDescriptors,
           photoData: primaryPhotoData || undefined,
@@ -654,9 +796,7 @@ export default function StudentEnrollPage() {
       const refCode = data.submissionId ? data.submissionId.slice(-8).toUpperCase() : 'SUB-OK'
       setSubmittedRefCode(refCode)
 
-      const courseCodes = availableCourses
-        .filter((c) => selectedCourseIds.includes(c.id))
-        .map((c) => c.code)
+      const courseCodes = selectedCourseObjects.map((c) => c.code)
 
       const receipt: EnrollmentReceipt = {
         studentId: studentId.trim().toUpperCase(),
@@ -881,34 +1021,60 @@ export default function StudentEnrollPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Department selection */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
+                  {/* School / Faculty selection (school-first flow) */}
+                  {schoolMode ? (
+                    <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                        Department
+                        School / Faculty
                       </label>
-                      {targetCourse && (
-                        <span className="text-[11px] text-primary font-medium">
-                          Locked to course department
-                        </span>
+                      <select
+                        value={selectedSchoolId}
+                        onChange={(e) => handleSchoolChange(e.target.value)}
+                        className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        <option value="">Select your School / Faculty…</option>
+                        {schools.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.code})
+                          </option>
+                        ))}
+                      </select>
+                      {selectedSchoolId && schoolInfo && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Showing {termLabel.toLowerCase()} {currentSemester} courses — set your level below to narrow the list.
+                        </p>
                       )}
                     </div>
-                    <select
-                      value={selectedDeptId}
-                      disabled={!!targetCourse}
-                      onChange={(e) => {
-                        setSelectedDeptId(e.target.value)
-                        setSelectedCourseIds([])
-                      }}
-                      className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-80"
-                    >
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name} ({d.institutionName})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  ) : (
+                    /* Department selection (legacy flow) */
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                          Department
+                        </label>
+                        {targetCourse && (
+                          <span className="text-[11px] text-primary font-medium">
+                            Locked to course department
+                          </span>
+                        )}
+                      </div>
+                      <select
+                        value={selectedDeptId}
+                        disabled={!!targetCourse}
+                        onChange={(e) => {
+                          setSelectedDeptId(e.target.value)
+                          setSelectedCourseIds([])
+                        }}
+                        className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-80"
+                      >
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name} ({d.institutionName})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Student ID & Level */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -927,12 +1093,26 @@ export default function StudentEnrollPage() {
                       <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                         Level
                       </label>
-                      <div
-                        className="w-full h-11 px-3 rounded-xl border bg-muted/50 flex items-center text-sm font-semibold text-foreground"
-                        title="Level is set automatically from your course"
-                      >
-                        Level {effectiveLevel}
-                      </div>
+                      {schoolMode ? (
+                        <select
+                          value={level}
+                          onChange={(e) => setLevel(Number(e.target.value))}
+                          className="w-full h-11 px-3 rounded-xl border bg-card text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                            <option key={l} value={l}>
+                              Level {l}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div
+                          className="w-full h-11 px-3 rounded-xl border bg-muted/50 flex items-center text-sm font-semibold text-foreground"
+                          title="Level is set automatically from your course"
+                        >
+                          Level {effectiveLevel}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1001,52 +1181,156 @@ export default function StudentEnrollPage() {
                       </span>
                     </div>
 
-                    {availableCourses.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-3">
-                        No courses registered in this department yet. You can proceed and the department head will assign courses later.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1 border rounded-xl bg-card">
-                        {availableCourses.map((c) => {
-                          const isChecked = selectedCourseIds.includes(c.id)
-                          const isTarget = targetCourse && c.id === targetCourse.id
-                          return (
-                            <button
-                              type="button"
-                              key={c.id}
-                              onClick={() => toggleCourse(c.id)}
-                              className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
-                                isChecked
-                                  ? 'border-primary bg-primary/10 text-foreground'
-                                  : 'border-border/60 hover:bg-accent/50 text-muted-foreground'
-                              } ${isTarget ? 'ring-1 ring-primary/40' : ''}`}
-                            >
-                              <div
-                                className={`mt-0.5 w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
-                                  isChecked
-                                    ? 'bg-primary border-primary text-primary-foreground'
-                                    : 'border-muted-foreground/40'
-                                }`}
-                              >
-                                {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
-                              </div>
-                              <div className="min-w-0 flex-1 leading-tight">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="font-mono text-xs font-bold text-foreground">
-                                    {c.code}
-                                  </span>
-                                  {isTarget && (
-                                    <span className="text-[10px] font-semibold text-primary bg-primary/20 px-1.5 py-0.5 rounded">
-                                      Required
-                                    </span>
-                                  )}
+                    {schoolMode ? (
+                      loadingSchool ? (
+                        <div className="py-8 flex flex-col items-center justify-center gap-2">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                          <p className="text-xs text-muted-foreground">Loading school courses…</p>
+                        </div>
+                      ) : !selectedSchoolId ? (
+                        <p className="text-xs text-muted-foreground italic py-3">
+                          Select your School / Faculty above to see its courses.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-muted-foreground">
+                              <span className="font-semibold text-foreground">Level {level}</span>
+                              {' · '}
+                              {termLabel} {currentSemester}
+                            </p>
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                              <Checkbox
+                                checked={showOtherLevels}
+                                onCheckedChange={(v) => setShowOtherLevels(v === true)}
+                              />
+                              Show courses from other levels
+                            </label>
+                          </div>
+
+                          {visibleSchoolDepartments.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic py-3">
+                              No {termLabel.toLowerCase()} {currentSemester} courses for Level {level} in this school
+                              yet. Turn on "Show courses from other levels" to include carry-over and elective courses.
+                            </p>
+                          ) : (
+                            <div className="space-y-3 max-h-80 overflow-y-auto p-2 border rounded-xl bg-card">
+                              {visibleSchoolDepartments.map((dept) => (
+                                <div key={dept.id} className="space-y-1.5">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    {dept.name} <span className="font-mono">({dept.code})</span>
+                                  </p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {dept.courses.map((c) => {
+                                      const isChecked = selectedCourseIds.includes(c.id)
+                                      return (
+                                        <button
+                                          type="button"
+                                          key={c.id}
+                                          onClick={() => toggleSchoolCourse(c.id, dept.id)}
+                                          className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                                            isChecked
+                                              ? 'border-primary bg-primary/10 text-foreground'
+                                              : 'border-border/60 hover:bg-accent/50 text-muted-foreground'
+                                          }`}
+                                        >
+                                          <div
+                                            className={`mt-0.5 w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                              isChecked
+                                                ? 'bg-primary border-primary text-primary-foreground'
+                                                : 'border-muted-foreground/40'
+                                            }`}
+                                          >
+                                            {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                                          </div>
+                                          <div className="min-w-0 flex-1 leading-tight">
+                                            <span className="font-mono text-xs font-bold text-foreground">
+                                              {c.code}
+                                            </span>
+                                            <p className="text-xs truncate">{c.title}</p>
+                                          </div>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
                                 </div>
-                                <p className="text-xs truncate">{c.title}</p>
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Home department for the student record */}
+                          <div className="space-y-1.5 pt-1">
+                            <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                              Home Department *
+                            </label>
+                            <select
+                              value={selectedDeptId}
+                              onChange={(e) => setSelectedDeptId(e.target.value)}
+                              className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">Select your home department…</option>
+                              {departments.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.name}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[11px] text-muted-foreground">
+                              Your student record lives here; your selected courses may come from any department in the school.
+                            </p>
+                          </div>
+                        </>
+                      )
+                    ) : (
+                      <>
+                        {availableCourses.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic py-3">
+                            No courses registered in this department yet. You can proceed and the department head will assign courses later.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1 border rounded-xl bg-card">
+                            {availableCourses.map((c) => {
+                              const isChecked = selectedCourseIds.includes(c.id)
+                              const isTarget = targetCourse && c.id === targetCourse.id
+                              return (
+                                <button
+                                  type="button"
+                                  key={c.id}
+                                  onClick={() => toggleCourse(c.id)}
+                                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                                    isChecked
+                                      ? 'border-primary bg-primary/10 text-foreground'
+                                      : 'border-border/60 hover:bg-accent/50 text-muted-foreground'
+                                  } ${isTarget ? 'ring-1 ring-primary/40' : ''}`}
+                                >
+                                  <div
+                                    className={`mt-0.5 w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                      isChecked
+                                        ? 'bg-primary border-primary text-primary-foreground'
+                                        : 'border-muted-foreground/40'
+                                    }`}
+                                  >
+                                    {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                                  </div>
+                                  <div className="min-w-0 flex-1 leading-tight">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="font-mono text-xs font-bold text-foreground">
+                                        {c.code}
+                                      </span>
+                                      {isTarget && (
+                                        <span className="text-[10px] font-semibold text-primary bg-primary/20 px-1.5 py-0.5 rounded">
+                                          Required
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs truncate">{c.title}</p>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 

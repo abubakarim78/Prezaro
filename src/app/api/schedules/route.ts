@@ -28,14 +28,22 @@ export async function GET(req: Request) {
     const user = await requireUser(req)
 
     const schedules = await db.classSchedule.findMany({
-      where: user.departmentId
-        ? {
-            OR: [
-              { lecturerId: user.id },
-              { course: { departmentId: user.departmentId } },
-            ],
-          }
-        : { lecturerId: user.id },
+      where:
+        user.role === 'DEAN' && user.schoolId
+          ? {
+              OR: [
+                { lecturerId: user.id },
+                { course: { department: { schoolId: user.schoolId } } },
+              ],
+            }
+          : user.departmentId
+            ? {
+                OR: [
+                  { lecturerId: user.id },
+                  { course: { departmentId: user.departmentId } },
+                ],
+              }
+            : { lecturerId: user.id },
       include: {
         course: {
           select: {

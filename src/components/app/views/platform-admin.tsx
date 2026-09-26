@@ -49,6 +49,7 @@ import type {
   PlatformStats,
   PlatformUsersResponse,
   Role,
+  School,
   User,
 } from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
@@ -118,6 +119,10 @@ const ROLE_BADGES: Record<Role, { label: string; className: string }> = {
     label: 'Super Admin',
     className: 'border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-400',
   },
+  DEAN: {
+    label: 'Dean / School Head',
+    className: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+  },
   ADMIN: {
     label: 'Dept Admin / HOD',
     className: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400',
@@ -153,7 +158,18 @@ export default function PlatformAdminView() {
     name: '',
     code: '',
     institutionId: '',
+    schoolId: '',
   })
+
+  // Schools layer (Institution → School → Department)
+  const [schools, setSchools] = useState<School[]>([])
+  const [addSchoolOpen, setAddSchoolOpen] = useState(false)
+  const [newSchoolData, setNewSchoolData] = useState({ name: '', code: '', institutionId: '' })
+  const [manageSchool, setManageSchool] = useState<School | null>(null)
+  const [deanName, setDeanName] = useState('')
+  const [deanEmail, setDeanEmail] = useState('')
+  const [invitingDean, setInvitingDean] = useState(false)
+  const [deanResult, setDeanResult] = useState<{ code: string; emailed: boolean } | null>(null)
 
   // Institutions Filters & search
   const [search, setSearch] = useState('')
@@ -169,7 +185,10 @@ export default function PlatformAdminView() {
 
   // Deep-link support: home quick links open a specific tab…
   const [activeTab, setActiveTab] = useState(() =>
-    params.tab === 'departments' || params.tab === 'users' || params.tab === 'policies'
+    params.tab === 'departments' ||
+    params.tab === 'schools' ||
+    params.tab === 'users' ||
+    params.tab === 'policies'
       ? params.tab
       : 'institutions'
   )
@@ -234,6 +253,7 @@ export default function PlatformAdminView() {
     confidenceThreshold: 0.48,
     lateGraceMinutes: 15,
     termSystem: 'SEMESTER',
+    currentSemester: 1,
     atRiskThreshold: 75,
     contactEmail: '',
     contactPhone: '',
@@ -246,15 +266,17 @@ export default function PlatformAdminView() {
     if (!quiet) setLoading(true)
     else setRefreshing(true)
     try {
-      const [resInst, resUsers, resDepts] = await Promise.all([
+      const [resInst, resUsers, resDepts, resSchools] = await Promise.all([
         api<PlatformInstitutionsResponse>('/api/platform/institutions'),
         api<PlatformUsersResponse>('/api/platform/users'),
         api<{ departments: Department[] }>('/api/departments').catch(() => ({ departments: [] })),
+        api<{ schools: School[] }>('/api/platform/schools').catch(() => ({ schools: [] })),
       ])
       setInstitutions(resInst.institutions)
       setStats(resInst.stats)
       setPlatformUsers(resUsers.users)
       setDepartments(resDepts.departments)
+      setSchools(resSchools.schools)
       setError(null)
     } catch (e) {
       setError(getErrorMessage(e))
@@ -341,11 +363,12 @@ export default function PlatformAdminView() {
           name: newDeptData.name.trim(),
           code: newDeptData.code.trim().toUpperCase(),
           institutionId: newDeptData.institutionId,
+          ...(newDeptData.schoolId ? { schoolId: newDeptData.schoolId } : {}),
         },
       })
       toast.success(`Department "${newDeptData.name}" created successfully`)
       setAddDeptOpen(false)
-      setNewDeptData({ name: '', code: '', institutionId: '' })
+      setNewDeptData({ name: '', code: '', institutionId: '', schoolId: '' })
       loadData(true)
     } catch (e) {
       toast.error(getErrorMessage(e))
@@ -364,6 +387,73 @@ export default function PlatformAdminView() {
       loadData(true)
     } catch (e) {
       toast.error(getErrorMessage(e))
+    }
+  }
+
+  // ---------- Schools layer (Institution → School → Department) ----------
+  const handleCreateSchool = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newSchoolData.name.trim() || !newSchoolData.code.trim()) {
+      toast.error('Please enter school name and code')
+      return
+    }
+    setSaving(true)
+    try {
+      await api('/api/platform/schools', {
+        method: 'POST',
+        body: {
+          name: newSchoolData.name.trim(),
+          code: newSchoolData.code.trim().toUpperCase(),
+          institutionId: newSchoolData.institutionId || undefined,
+        },
+      })
+      toast.success(`School "${newSchoolData.name}" created successfully`)
+      setAddSchoolOpen(false)
+      setNewSchoolData({ name: '', code: '', institutionId: '' })
+      loadData(true)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const openSchoolDrawer = (s: School) => {
+    setManageSchool(s)
+    setDeanResult(null)
+    setDeanName('')
+    setDeanEmail('')
+  }
+
+  // Open the department-create dialog preconfigured for this school.
+  const openDeptDialogForSchool = (s: School) => {
+    setNewDeptData({ name: '', code: '', institutionId: s.institutionId || '', schoolId: s.id })
+    setAddDeptOpen(true)
+  }
+
+  const handleInviteDean = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manageSchool) return
+    setInvitingDean(true)
+    try {
+      const res = await api<{ code: AccessCode }>('/api/departments/codes', {
+        method: 'POST',
+        body: {
+          role: 'DEAN',
+          schoolId: manageSchool.id,
+          designatedName: deanName.trim() || undefined,
+          designatedEmail: deanEmail.trim() || undefined,
+          sendEmailImmediately: Boolean(deanEmail.trim()),
+          maxUses: 1,
+          expiresInDays: 7,
+        },
+      })
+      setDeanResult({ code: res.code.code, emailed: Boolean(deanEmail.trim()) })
+      toast.success(`Dean invite code created for ${manageSchool.name}`)
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setInvitingDean(false)
     }
   }
 
@@ -631,6 +721,7 @@ export default function PlatformAdminView() {
         confidenceThreshold: 0.48,
         lateGraceMinutes: 15,
         termSystem: 'SEMESTER',
+        currentSemester: 1,
         atRiskThreshold: 75,
         contactEmail: '',
         contactPhone: '',
@@ -662,6 +753,7 @@ export default function PlatformAdminView() {
           confidenceThreshold: editTarget.confidenceThreshold,
           lateGraceMinutes: editTarget.lateGraceMinutes,
           termSystem: editTarget.termSystem,
+          currentSemester: editTarget.currentSemester,
           atRiskThreshold: editTarget.atRiskThreshold,
           contactEmail: editTarget.contactEmail,
           contactPhone: editTarget.contactPhone,
@@ -877,7 +969,7 @@ export default function PlatformAdminView() {
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
+          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-5 sm:max-w-3xl bg-muted/60 p-1 rounded-xl">
             <TabsTrigger
               value="institutions"
               className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
@@ -885,6 +977,14 @@ export default function PlatformAdminView() {
               <Building2 className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">Institutions</span>
               <span className="shrink-0 tabular-nums opacity-80">({institutions.length})</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="schools"
+              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
+            >
+              <Layers className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">Schools</span>
+              <span className="shrink-0 tabular-nums opacity-80">({schools.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="departments"
@@ -1083,6 +1183,105 @@ export default function PlatformAdminView() {
             )}
           </TabsContent>
 
+          {/* TAB 2: Schools Layer (Institution → School → Department) */}
+          <TabsContent value="schools" className="mt-4 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
+              <p className="text-xs text-muted-foreground max-w-md">
+                Schools sit between institutions and departments. Each school gets a{' '}
+                <strong className="text-foreground">Dean</strong> who approves all its enrollment
+                submissions and invites department HoDs.
+              </p>
+              <Button
+                onClick={() => setAddSchoolOpen(true)}
+                size="sm"
+                className="gap-1.5 h-9 text-xs font-semibold shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Create School
+              </Button>
+            </div>
+
+            {schools.length === 0 ? (
+              <EmptyState
+                icon={Layers}
+                title="No schools yet"
+                description="Create a school/faculty, then invite a Dean and add departments inside it."
+                action={
+                  <Button onClick={() => setAddSchoolOpen(true)} size="sm" className="gap-1.5 mt-2">
+                    <Plus className="h-3.5 w-3.5" /> Create School
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="rounded-2xl border bg-card overflow-hidden shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted/50 border-b text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3 px-4">School</th>
+                        <th className="py-3 px-4">Institution</th>
+                        <th className="py-3 px-4">Metrics</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {schools.map((s) => (
+                        <tr key={s.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-foreground">{s.name}</div>
+                            <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                              {s.code}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5 font-medium text-foreground">
+                              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>{s.institutionName || 'Unassigned'}</span>
+                            </div>
+                            {s.institutionCode && (
+                              <p className="text-[10px] text-muted-foreground font-mono">{s.institutionCode}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                              <span>
+                                <strong className="text-foreground">{s.departmentCount ?? 0}</strong> departments
+                              </span>
+                              <span>·</span>
+                              <span>
+                                <strong
+                                  className={cn(
+                                    'tabular-nums',
+                                    (s.pendingCount ?? 0) > 0 ? 'text-amber-600' : 'text-foreground'
+                                  )}
+                                >
+                                  {s.pendingCount ?? 0}
+                                </strong>{' '}
+                                pending approvals
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openSchoolDrawer(s)}
+                              className="h-8 gap-1.5 px-2 text-xs font-semibold text-primary hover:text-primary"
+                              title="Manage school"
+                            >
+                              <Settings2 className="h-3.5 w-3.5" />
+                              Manage
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
           {/* TAB 2: Departments Management */}
           <TabsContent value="departments" className="mt-4 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
@@ -1162,6 +1361,12 @@ export default function PlatformAdminView() {
                             {d.institutionCode && (
                               <p className="text-[10px] text-muted-foreground font-mono">{d.institutionCode}</p>
                             )}
+                            {d.schoolName && (
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                <Layers className="h-3 w-3 text-primary" />
+                                {d.schoolName}
+                              </p>
+                            )}
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -1240,6 +1445,7 @@ export default function PlatformAdminView() {
                   <SelectContent>
                     <SelectItem value="ALL">All Roles</SelectItem>
                     <SelectItem value="SUPERADMIN">Super Admin</SelectItem>
+                    <SelectItem value="DEAN">Dean / School Head</SelectItem>
                     <SelectItem value="ADMIN">Dept Admin</SelectItem>
                     <SelectItem value="LECTURER">Lecturer</SelectItem>
                   </SelectContent>
@@ -1435,7 +1641,8 @@ export default function PlatformAdminView() {
           <DialogHeader>
             <DialogTitle>Create New Department</DialogTitle>
             <DialogDescription>
-              Add an academic department to an institution. Lecturers and courses can then be assigned to it.
+              Add an academic department to an institution, optionally inside a school/faculty.
+              Lecturers and courses can then be assigned to it.
             </DialogDescription>
           </DialogHeader>
 
@@ -1492,6 +1699,35 @@ export default function PlatformAdminView() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">School / Faculty (optional)</Label>
+                <Select
+                  value={newDeptData.schoolId}
+                  onValueChange={(v) => {
+                    const school = schools.find((s) => s.id === v)
+                    setNewDeptData((p) => ({
+                      ...p,
+                      schoolId: v,
+                      ...(school?.institutionId ? { institutionId: school.institutionId } : {}),
+                    }))
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No school (standalone department)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {schools.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name} ({s.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Departments inside a school share its Dean for enrollment approvals.
+                </p>
               </div>
             </div>
 
@@ -1833,6 +2069,25 @@ export default function PlatformAdminView() {
               </div>
 
               <div className="space-y-1">
+                <Label htmlFor="inst-curterm" className="text-xs">
+                  Current Semester / Trimester
+                </Label>
+                <Select
+                  value={String(formData.currentSemester ?? 1)}
+                  onValueChange={(v) => setFormData((p) => ({ ...p, currentSemester: Number(v) }))}
+                >
+                  <SelectTrigger id="inst-curterm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Term 1 (current)</SelectItem>
+                    <SelectItem value="2">Term 2 (current)</SelectItem>
+                    <SelectItem value="3">Term 3 (current)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
                 <Label htmlFor="inst-students" className="text-xs">
                   Max Students Quota
                 </Label>
@@ -1979,6 +2234,28 @@ export default function PlatformAdminView() {
                       <SelectItem value="QUARTER">Quarter System</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">Current Semester / Trimester (drives enrollment)</Label>
+                  <Select
+                    value={String(editTarget.currentSemester ?? 1)}
+                    onValueChange={(v: any) =>
+                      setEditTarget({ ...editTarget, currentSemester: Number(v) })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Term 1 (current)</SelectItem>
+                      <SelectItem value="2">Term 2 (current)</SelectItem>
+                      <SelectItem value="3">Term 3 (current)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Students on /enroll only see courses matching this term.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -2440,6 +2717,248 @@ export default function PlatformAdminView() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* ---------- DRAWER: Manage School (Dean invite, departments, enroll link) ---------- */}
+      <Sheet open={manageSchool !== null} onOpenChange={(open) => !open && setManageSchool(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto scrollbar-thin">
+          <SheetHeader className="text-left">
+            <SheetTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5 text-primary" />
+              {manageSchool?.name}
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground">
+              {manageSchool?.code} · {manageSchool?.institutionName || 'No institution'} · Invite the
+              Dean, add departments, and share the school enrollment link.
+            </p>
+          </SheetHeader>
+
+          {manageSchool && (
+            <div className="space-y-6 px-4 pb-8">
+              {/* --- Stats --- */}
+              <section className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border bg-accent/30 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    Departments
+                  </p>
+                  <p className="text-xl font-bold tabular-nums mt-0.5">
+                    {manageSchool.departmentCount ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-accent/30 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    Pending Approvals
+                  </p>
+                  <p
+                    className={cn(
+                      'text-xl font-bold tabular-nums mt-0.5',
+                      (manageSchool.pendingCount ?? 0) > 0 ? 'text-amber-600' : ''
+                    )}
+                  >
+                    {manageSchool.pendingCount ?? 0}
+                  </p>
+                </div>
+              </section>
+
+              {/* --- Invite Dean --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Invite Dean / School Head
+                </h3>
+                <form onSubmit={handleInviteDean} className="space-y-2.5">
+                  <Input
+                    value={deanName}
+                    onChange={(e) => setDeanName(e.target.value)}
+                    placeholder="Dean full name (optional)"
+                    className="h-10 text-sm"
+                  />
+                  <Input
+                    type="email"
+                    value={deanEmail}
+                    onChange={(e) => setDeanEmail(e.target.value)}
+                    placeholder="Dean email — sends the code by email"
+                    className="h-10 text-sm"
+                  />
+                  <Button type="submit" size="sm" disabled={invitingDean} className="w-full gap-1.5 font-semibold">
+                    {invitingDean ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                    Generate Dean invite code
+                  </Button>
+                </form>
+                {deanResult && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                    <p className="text-[11px] font-semibold text-foreground">
+                      {deanResult.emailed
+                        ? 'Code generated and emailed — it is also shown below.'
+                        : 'Share this code with the new Dean:'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-2.5 py-1.5 font-mono text-sm font-bold text-primary">
+                        {deanResult.code}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(deanResult.code)
+                          toast.success('Invite code copied')
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" /> Copy
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      The Dean claims it on /signup — they get the School Control console and approve
+                      all enrollment submissions for this school.
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* --- Departments in this school --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <GraduationCap className="h-3.5 w-3.5" />
+                  Departments in this school
+                </h3>
+                {departments.filter((d) => d.schoolId === manageSchool.id).length === 0 ? (
+                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
+                    No departments in this school yet.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {departments
+                      .filter((d) => d.schoolId === manageSchool.id)
+                      .map((d) => (
+                        <div
+                          key={d.id}
+                          className="flex items-center justify-between rounded-xl border px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-foreground">{d.name}</p>
+                            <p className="font-mono text-[10px] text-muted-foreground">
+                              {d.code} · {d.studentCount ?? 0} students · {d.courseCount ?? 0} courses
+                            </p>
+                          </div>
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        </div>
+                      ))}
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full gap-1.5 font-semibold"
+                  onClick={() => openDeptDialogForSchool(manageSchool)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Create department in {manageSchool.code}
+                </Button>
+              </section>
+
+              {/* --- School enrollment link --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  School enrollment link
+                </h3>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/enroll?school=${manageSchool.code || manageSchool.id}`}
+                    className="min-w-0 flex-1 font-mono text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 gap-1"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        `${window.location.origin}/enroll?school=${manageSchool.code || manageSchool.id}`
+                      )
+                      toast.success('School enrollment link copied')
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Students opening this link land on the school preselected; they still pick their
+                  level and see only this school&apos;s courses for the current term.
+                </p>
+              </section>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ---------- MODAL: Create School ---------- */}
+      <Dialog open={addSchoolOpen} onOpenChange={setAddSchoolOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New School</DialogTitle>
+            <DialogDescription>
+              Add a school/faculty under an institution. Departments and a Dean are attached to it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateSchool} className="space-y-4 pt-2">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  School / Faculty Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  value={newSchoolData.name}
+                  onChange={(e) => setNewSchoolData((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. School of Physical & Mathematical Sciences"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  School Code / Acronym <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  value={newSchoolData.code}
+                  onChange={(e) => setNewSchoolData((p) => ({ ...p, code: e.target.value.toUpperCase() }))}
+                  placeholder="e.g. SPMS"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Parent Institution</Label>
+                <Select
+                  value={newSchoolData.institutionId}
+                  onValueChange={(v) => setNewSchoolData((p) => ({ ...p, institutionId: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Institution" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {institutions.map((i) => (
+                      <SelectItem key={i.id} value={i.id}>
+                        {i.name} ({i.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setAddSchoolOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Creating...' : 'Create School'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

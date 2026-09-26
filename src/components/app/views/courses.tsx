@@ -21,7 +21,14 @@ import { toast } from 'sonner'
 
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
-import { termLabel, type Course, type CoursesResponse, type TermSystem } from '@/lib/types'
+import {
+  termLabel,
+  type Course,
+  type CoursesResponse,
+  type Department,
+  type DepartmentsResponse,
+  type TermSystem,
+} from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -69,7 +76,8 @@ function termToValue(semester: number, termSystem: TermSystem): string {
 export default function CoursesView() {
   const user = useAppStore((s) => s.user)
   // Lecturers get a read-only roster view; only HoDs / the super admin manage.
-  const canManage = user?.role === 'ADMIN' || user?.role === 'SUPERADMIN'
+  const canManage =
+    user?.role === 'ADMIN' || user?.role === 'DEAN' || user?.role === 'SUPERADMIN'
 
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -145,7 +153,9 @@ export default function CoursesView() {
           <div className="mb-4 rounded-2xl border bg-card p-4 sm:p-5">
             <h2 className="text-sm font-semibold tracking-tight">New course</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Created instantly in your department — students join it from the Students page.
+              {user?.role === 'DEAN'
+                ? 'Created instantly in your school — students join it from the Students page.'
+                : 'Created instantly in your department — students join it from the Students page.'}
             </p>
             <CourseForm
               className="mt-4"
@@ -287,6 +297,7 @@ interface CourseBody {
   semester: number
   termSystem: TermSystem
   lecturerId?: string
+  departmentId?: string
 }
 
 /** Department staff entry for the lecturer assignment select. */
@@ -322,6 +333,9 @@ function CourseForm({
   const [lecturerId, setLecturerId] = useState(initial?.lecturerId ?? user?.id ?? '')
   const [staff, setStaff] = useState<StaffMember[] | null>(null)
   const [saving, setSaving] = useState(false)
+  const isDean = user?.role === 'DEAN'
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [departmentId, setDepartmentId] = useState('')
 
   // HoD / super admin only: department staff for the lecturer select.
   useEffect(() => {
@@ -340,7 +354,25 @@ function CourseForm({
     }
   }, [showLecturer])
 
-  const valid = code.trim().length > 0 && title.trim().length > 0
+  // A Dean has no single home department — pick the owning department
+  // within their school when creating a course.
+  useEffect(() => {
+    if (initial || !isDean) return
+    let cancelled = false
+    api<DepartmentsResponse>('/api/departments')
+      .then((d) => {
+        if (cancelled) return
+        setDepartments(d.departments)
+        setDepartmentId((cur) => cur || d.departments[0]?.id || '')
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [initial, isDean])
+
+  const valid =
+    code.trim().length > 0 && title.trim().length > 0 && (!isDean || Boolean(departmentId))
 
   const submit = async () => {
     if (!valid || saving) return
@@ -354,6 +386,7 @@ function CourseForm({
         semester,
         termSystem,
         ...(lecturerId ? { lecturerId } : {}),
+        ...(departmentId ? { departmentId } : {}),
       })
     } catch (e) {
       toast.error(getErrorMessage(e))
@@ -407,6 +440,23 @@ function CourseForm({
           className="h-11"
         />
       </div>
+      {isDean && !initial && (
+        <div className="space-y-1.5">
+          <Label htmlFor="cf-dept">Department</Label>
+          <Select value={departmentId} onValueChange={setDepartmentId}>
+            <SelectTrigger id="cf-dept" className="h-11 w-full">
+              <SelectValue placeholder="Select department" />
+            </SelectTrigger>
+            <SelectContent>
+              {departments.map((d) => (
+                <SelectItem key={d.id} value={d.id}>
+                  {d.name} ({d.code})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label htmlFor="cf-term">Term</Label>
         <Select value={term} onValueChange={setTerm}>

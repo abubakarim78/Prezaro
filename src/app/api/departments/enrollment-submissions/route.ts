@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { getSessionUser, requireUser } from '@/lib/auth'
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError, handle, readJson, zodMessage } from '../../_lib/helpers'
@@ -13,6 +14,7 @@ const submissionSchema = z.object({
   phone: z.string().trim().optional(),
   level: z.coerce.number().int().min(100).max(900).default(100),
   departmentId: z.string().min(1, 'Department is required'),
+  schoolId: z.string().optional(),
   courseIds: z.array(z.string()).default([]),
   descriptors: z.array(z.array(z.number())).min(1, 'At least one face descriptor capture is required'),
   photoData: z.string().optional(),
@@ -31,6 +33,30 @@ export async function POST(req: Request) {
       include: { institution: true },
     })
     if (!dept) throw new NotFoundError('Department not found')
+
+    // Resolve school context: explicit schoolId (school-first flow) wins, else derive from the home department.
+    let schoolId: string | null = data.schoolId?.trim() || null
+    if (schoolId) {
+      const school = await db.school.findUnique({ where: { id: schoolId } })
+      if (!school) throw new NotFoundError('School not found')
+      if (dept.schoolId !== schoolId) {
+        throw new BadRequestError('Selected home department does not belong to the selected school')
+      }
+    } else {
+      schoolId = dept.schoolId ?? null
+    }
+
+    // Guarantee no unknown courses: every picked course must belong to the submitted school.
+    if (schoolId && data.courseIds.length > 0) {
+      const picked = await db.course.findMany({
+        where: { id: { in: data.courseIds } },
+        select: { id: true, department: { select: { schoolId: true } } },
+      })
+      const valid = new Set(picked.filter((c) => c.department?.schoolId === schoolId).map((c) => c.id))
+      if (data.courseIds.some((id) => !valid.has(id))) {
+        throw new BadRequestError('One or more selected courses do not belong to the selected school')
+      }
+    }
 
     const cleanStudentId = data.studentId.toUpperCase().trim()
     const cleanEmail = data.email.toLowerCase().trim()
@@ -89,6 +115,7 @@ export async function POST(req: Request) {
         phone: data.phone || null,
         level: data.level,
         departmentId: data.departmentId,
+        schoolId: schoolId,
         courseIdsJson: JSON.stringify(data.courseIds),
         descriptorsJson: JSON.stringify(data.descriptors),
         photoData: data.photoData || null,
@@ -108,26 +135,38 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can view submissions')
+    if (user.role === 'ADMIN' || user.role === 'LECTURER') {
+      throw new ForbiddenError('Enrollment approval is handled by the Dean\'s office and super administrators')
     }
 
     const url = new URL(req.url)
-    const departmentId = user.role === 'SUPERADMIN'
-      ? url.searchParams.get('departmentId') ?? user.departmentId
-      : user.departmentId
-
-    if (!departmentId) throw new BadRequestError('Department ID is required')
-
     const statusFilter = url.searchParams.get('status') ?? undefined
 
-    const raw = await db.enrollmentSubmission.findMany({
-      where: {
-        departmentId,
+    let where: Prisma.EnrollmentSubmissionWhereInput
+    if (user.role === 'DEAN') {
+      if (!user.schoolId) throw new ForbiddenError('No school is assigned to your account')
+      // School-wide queue: submissions made against the school itself (school-first flow)
+      // plus legacy rows whose home department belongs to the school.
+      where = {
+        OR: [{ schoolId: user.schoolId }, { department: { schoolId: user.schoolId } }],
         ...(statusFilter ? { status: statusFilter } : {}),
-      },
+      }
+    } else {
+      // SUPERADMIN: optional schoolId / departmentId filters; unfiltered returns everything.
+      const departmentId = url.searchParams.get('departmentId') ?? undefined
+      const schoolId = url.searchParams.get('schoolId') ?? undefined
+      where = {
+        ...(departmentId ? { departmentId } : {}),
+        ...(schoolId ? { schoolId } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
+      }
+    }
+
+    const raw = await db.enrollmentSubmission.findMany({
+      where,
       include: {
-        department: { select: { name: true, code: true } },
+        department: { select: { name: true, code: true, schoolId: true } },
+        school: { select: { name: true, code: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
@@ -141,13 +180,15 @@ export async function GET(req: Request) {
       } catch {}
     }
 
-    const coursesMap = new Map<string, { id: string; code: string; title: string }>()
+    const coursesMap = new Map<string, { id: string; code: string; title: string; departmentName: string | null }>()
     if (allCourseIds.size > 0) {
       const courses = await db.course.findMany({
         where: { id: { in: Array.from(allCourseIds) } },
-        select: { id: true, code: true, title: true },
+        select: { id: true, code: true, title: true, department: { select: { name: true } } },
       })
-      for (const c of courses) coursesMap.set(c.id, c)
+      for (const c of courses) {
+        coursesMap.set(c.id, { id: c.id, code: c.code, title: c.title, departmentName: c.department?.name ?? null })
+      }
     }
 
     const submissions: EnrollmentSubmission[] = raw.map((s) => {
@@ -162,7 +203,7 @@ export async function GET(req: Request) {
 
       const resolvedCourses = courseIds
         .map((cid) => coursesMap.get(cid))
-        .filter((c): c is { id: string; code: string; title: string } => !!c)
+        .filter((c): c is { id: string; code: string; title: string; departmentName: string | null } => !!c)
 
       return {
         id: s.id,
@@ -174,6 +215,8 @@ export async function GET(req: Request) {
         level: s.level,
         departmentId: s.departmentId,
         departmentName: s.department.name,
+        schoolId: s.schoolId,
+        schoolName: s.school?.name ?? null,
         courseIds,
         courses: resolvedCourses,
         photoData: s.photoData,
@@ -199,8 +242,8 @@ const reviewActionSchema = z.object({
 export async function PATCH(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'ADMIN' && user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only department heads and administrators can review submissions')
+    if (user.role === 'ADMIN' || user.role === 'LECTURER') {
+      throw new ForbiddenError('Enrollment approval is handled by the Dean\'s office and super administrators')
     }
 
     const parsed = reviewActionSchema.safeParse(await readJson(req))
@@ -214,8 +257,11 @@ export async function PATCH(req: Request) {
     })
     if (!sub) throw new NotFoundError('Submission not found')
 
-    if (user.role !== 'SUPERADMIN' && sub.departmentId !== user.departmentId) {
-      throw new ForbiddenError('You can only review submissions for your department')
+    if (user.role === 'DEAN') {
+      // Dean reviews anything tied to their school: school-first submissions
+      // directly, or legacy rows via the submission's home department.
+      const inSchool = !!user.schoolId && (sub.schoolId === user.schoolId || sub.department?.schoolId === user.schoolId)
+      if (!inSchool) throw new ForbiddenError('You can only review submissions for your school')
     }
 
     if (action === 'REJECT') {

@@ -34,6 +34,9 @@ export async function POST(req: Request) {
           department: {
             include: { institution: { select: { id: true, name: true, slug: true } } },
           },
+          school: {
+            include: { institution: { select: { id: true, name: true, slug: true } } },
+          },
         },
       })
 
@@ -56,9 +59,13 @@ export async function POST(req: Request) {
         valid: true,
         code: accessCode.code,
         role: accessCode.role,
-        departmentName: accessCode.department.name,
-        departmentCode: accessCode.department.code,
-        institutionName: accessCode.department.institution?.name ?? 'Prezaro Campus',
+        // DEAN codes are school-scoped: surface the school as the join target.
+        departmentName: accessCode.department?.name ?? accessCode.school?.name ?? null,
+        departmentCode: accessCode.department?.code ?? accessCode.school?.code ?? null,
+        institutionName:
+          accessCode.department?.institution?.name ??
+          accessCode.school?.institution?.name ??
+          'Prezaro Campus',
         designatedEmail: accessCode.designatedEmail,
         designatedName: accessCode.designatedName,
       })
@@ -77,6 +84,7 @@ export async function POST(req: Request) {
           department: {
             include: { institution: true },
           },
+          school: true,
         },
       })
 
@@ -93,6 +101,20 @@ export async function POST(req: Request) {
         throw new BadRequestError(`This code was specifically assigned to ${accessCode.designatedEmail}`)
       }
 
+      // DEAN codes grant a school-wide role: the claimant becomes the school's
+      // dean. Department codes keep the existing department assignment.
+      const isDeanCode = accessCode.role === 'DEAN'
+      const claimData = {
+        name: name || undefined,
+        role: accessCode.role,
+        departmentId: isDeanCode ? null : accessCode.departmentId,
+        schoolId: isDeanCode ? accessCode.schoolId : null,
+        institutionId:
+          accessCode.department?.institutionId ?? accessCode.school?.institutionId ?? null,
+        onboarded: true,
+        codeClaimedId: accessCode.id,
+      }
+
       // Check if user already exists
       const existingUser = await db.user.findUnique({ where: { email } })
       let finalUser
@@ -105,35 +127,26 @@ export async function POST(req: Request) {
 
         finalUser = await db.user.update({
           where: { id: existingUser.id },
-          data: {
-            name: name || existingUser.name,
-            role: accessCode.role,
-            departmentId: accessCode.departmentId,
-            institutionId: accessCode.department.institutionId,
-            onboarded: true,
-            codeClaimedId: accessCode.id,
-          },
+          data: claimData,
           include: {
             department: true,
             institution: true,
+            school: true,
           },
         })
       } else {
         const passwordHash = await hash(password, 10)
         finalUser = await db.user.create({
           data: {
-            name,
             email,
             passwordHash,
-            role: accessCode.role,
-            departmentId: accessCode.departmentId,
-            institutionId: accessCode.department.institutionId,
-            onboarded: true,
-            codeClaimedId: accessCode.id,
+            ...claimData,
+            name,
           },
           include: {
             department: true,
             institution: true,
+            school: true,
           },
         })
       }

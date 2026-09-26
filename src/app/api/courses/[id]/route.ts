@@ -38,19 +38,34 @@ export async function PATCH(
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
     const data = parsed.data
 
-    // Only HoDs / the super admin assign the teaching lecturer, and the
-    // lecturer must belong to the course's department.
+    // Only HoDs / the Dean / the super admin assign the teaching lecturer.
+    // The lecturer must belong to the course's department (any department of
+    // the Dean's school is acceptable).
     if (data.lecturerId !== undefined) {
-      const lecturer = await db.user.findFirst({
-        where: {
-          id: data.lecturerId,
-          departmentId: course.departmentId,
-          role: { in: ['LECTURER', 'ADMIN'] },
-        },
-        select: { id: true },
-      })
+      const lecturer =
+        user.role === 'DEAN' && user.schoolId
+          ? await db.user.findFirst({
+              where: {
+                id: data.lecturerId,
+                role: { in: ['LECTURER', 'ADMIN'] },
+                department: { schoolId: user.schoolId },
+              },
+              select: { id: true },
+            })
+          : await db.user.findFirst({
+              where: {
+                id: data.lecturerId,
+                departmentId: course.departmentId,
+                role: { in: ['LECTURER', 'ADMIN'] },
+              },
+              select: { id: true },
+            })
       if (!lecturer) {
-        throw new BadRequestError('Assigned lecturer must belong to this department')
+        throw new BadRequestError(
+          user.role === 'DEAN'
+            ? 'Assigned lecturer must belong to your school'
+            : 'Assigned lecturer must belong to this department'
+        )
       }
     }
 

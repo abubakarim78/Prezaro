@@ -6,19 +6,25 @@ import { BadRequestError, ForbiddenError, NotFoundError, handle, readJson, zodMe
 
 export async function GET(req: Request) {
   return handle(async () => {
-    await requireUser(req)
+    const user = await requireUser(req)
     const url = new URL(req.url)
     const institutionId = url.searchParams.get('institutionId')
 
-    const whereClause: { institutionId?: string } = {}
+    const whereClause: { institutionId?: string; schoolId?: string } = {}
     if (institutionId && institutionId !== 'ALL') {
       whereClause.institutionId = institutionId
+    }
+    // Deans scope to their own school (school overview).
+    if (user.role === 'DEAN') {
+      if (!user.schoolId) return NextResponse.json({ departments: [] })
+      whereClause.schoolId = user.schoolId
     }
 
     const rawDepartments = await db.department.findMany({
       where: whereClause,
       include: {
         institution: { select: { id: true, name: true, code: true } },
+        school: { select: { id: true, name: true, code: true } },
         _count: {
           select: {
             courses: true,
@@ -38,6 +44,9 @@ export async function GET(req: Request) {
       institutionId: d.institutionId,
       institutionName: d.institution?.name,
       institutionCode: d.institution?.code,
+      schoolId: d.schoolId,
+      schoolName: d.school?.name ?? null,
+      schoolCode: d.school?.code ?? null,
       courseCount: d._count.courses,
       userCount: d._count.users,
       studentCount: d._count.students,
@@ -53,6 +62,7 @@ const createDeptSchema = z.object({
   name: z.string().trim().min(2, 'Department name must be at least 2 characters').max(100),
   code: z.string().trim().min(1, 'Department code is required').max(10).toUpperCase(),
   institutionId: z.string().min(1, 'Institution is required'),
+  schoolId: z.string().optional(),
 })
 
 export async function POST(req: Request) {
@@ -72,6 +82,12 @@ export async function POST(req: Request) {
     })
     if (!inst) throw new NotFoundError('Target institution not found')
 
+    // Ensure the target school exists when provided
+    if (parsed.data.schoolId) {
+      const school = await db.school.findUnique({ where: { id: parsed.data.schoolId } })
+      if (!school) throw new NotFoundError('Target school not found')
+    }
+
     // Check unique constraint (name + institutionId)
     const existing = await db.department.findFirst({
       where: {
@@ -88,9 +104,11 @@ export async function POST(req: Request) {
         name: parsed.data.name,
         code: parsed.data.code,
         institutionId: parsed.data.institutionId,
+        ...(parsed.data.schoolId ? { schoolId: parsed.data.schoolId } : {}),
       },
       include: {
         institution: { select: { id: true, name: true, code: true } },
+        school: { select: { id: true, name: true, code: true } },
       },
     })
 
@@ -102,6 +120,9 @@ export async function POST(req: Request) {
         institutionId: department.institutionId,
         institutionName: department.institution?.name,
         institutionCode: department.institution?.code,
+        schoolId: department.schoolId,
+        schoolName: department.school?.name ?? null,
+        schoolCode: department.school?.code ?? null,
         courseCount: 0,
         userCount: 0,
         studentCount: 0,
