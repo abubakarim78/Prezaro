@@ -130,6 +130,8 @@ interface EnrollmentReceipt {
   lastName: string
   email: string
   departmentName: string
+  // Set when the student is homed to a School/Faculty (school-first flow).
+  schoolName?: string
   courseCodes: string[]
   refCode: string
   submittedAt: string
@@ -148,7 +150,6 @@ export default function StudentEnrollPage() {
   const [selectedSchoolId, setSelectedSchoolId] = useState('')
   const [schoolInfo, setSchoolInfo] = useState<{ termSystem: string; currentSemester: number } | null>(null)
   const [level, setLevel] = useState(100)
-  const [showOtherLevels, setShowOtherLevels] = useState(false)
   const [isLegacyLink, setIsLegacyLink] = useState(false)
   const [loadingSchool, setLoadingSchool] = useState(false)
 
@@ -379,6 +380,12 @@ export default function StudentEnrollPage() {
         ? 'Quarter'
         : 'Semester'
 
+  // The student's academic home: their School/Faculty in the school-first
+  // flow (no home department), or the linked department in the legacy flow.
+  const homeName = schoolMode
+    ? (schools.find((s) => s.id === selectedSchoolId)?.name ?? 'your school')
+    : (currentDept?.name ?? '')
+
   // Every course across the selected school with its owning department —
   // picks can span departments, so the receipt can't rely on a single
   // department's course list.
@@ -392,9 +399,8 @@ export default function StudentEnrollPage() {
   const visibleSchoolDepartments = departments
     .map((d) => ({
       ...d,
-      courses: d.courses.filter(
-        (c) => c.semester === currentSemester && (showOtherLevels || c.level === level)
-      ),
+      // Students only ever see their own level's courses for the current term.
+      courses: d.courses.filter((c) => c.semester === currentSemester && c.level === level),
     }))
     .filter((d) => d.courses.length > 0)
 
@@ -402,19 +408,16 @@ export default function StudentEnrollPage() {
     setSelectedSchoolId(id)
     setSelectedCourseIds([])
     setSelectedDeptId('')
-    setShowOtherLevels(false)
     void loadSchoolCatalog(id)
   }
 
-  // School-mode pick: the home department defaults to the first picked
-  // course's department and stays editable afterwards.
-  const toggleSchoolCourse = (courseId: string, deptId: string) => {
+  // School-mode pick: courses may span departments — the student is homed to
+  // their School/Faculty, so no home department is tracked here.
+  const toggleSchoolCourse = (courseId: string) => {
     const next = selectedCourseIds.includes(courseId)
       ? selectedCourseIds.filter((c) => c !== courseId)
       : [...selectedCourseIds, courseId]
     setSelectedCourseIds(next)
-    if (next.length === 0) setSelectedDeptId('')
-    else if (!selectedDeptId) setSelectedDeptId(deptId)
   }
 
   const toggleCourse = (id: string) => {
@@ -433,8 +436,8 @@ export default function StudentEnrollPage() {
       setFormError('Please select your School / Faculty')
       return false
     }
-    if (!selectedDeptId) {
-      setFormError(schoolMode ? 'Please select your home department' : 'Please select your department')
+    if (!schoolMode && !selectedDeptId) {
+      setFormError('Please select your department')
       return false
     }
     if (!studentId.trim()) {
@@ -779,8 +782,9 @@ export default function StudentEnrollPage() {
           email: email.trim(),
           phone: phone.trim() || undefined,
           level: schoolMode ? level : effectiveLevel,
-          departmentId: selectedDeptId,
-          schoolId: selectedSchoolId || undefined,
+          // School-first students are homed to their school — no department.
+          departmentId: schoolMode ? undefined : selectedDeptId,
+          schoolId: schoolMode ? selectedSchoolId : undefined,
           courseIds: selectedCourseIds,
           descriptors: capturedDescriptors,
           photoData: primaryPhotoData || undefined,
@@ -803,7 +807,8 @@ export default function StudentEnrollPage() {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim().toLowerCase(),
-        departmentName: currentDept?.name || 'Academic Department',
+        departmentName: homeName || 'Academic Department',
+        schoolName: schoolMode ? homeName : undefined,
         courseCodes,
         refCode,
         submittedAt: new Date().toISOString(),
@@ -910,8 +915,12 @@ export default function StudentEnrollPage() {
 
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
-                  <p className="text-muted-foreground font-medium">Department</p>
-                  <p className="font-semibold text-foreground truncate mt-0.5">{existingReceipt.departmentName}</p>
+                  <p className="text-muted-foreground font-medium">
+                    {existingReceipt.schoolName ? 'School / Faculty' : 'Department'}
+                  </p>
+                  <p className="font-semibold text-foreground truncate mt-0.5">
+                    {existingReceipt.schoolName ?? existingReceipt.departmentName}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground font-medium">Reference Code</p>
@@ -1041,7 +1050,7 @@ export default function StudentEnrollPage() {
                       </select>
                       {selectedSchoolId && schoolInfo && (
                         <p className="text-[11px] text-muted-foreground">
-                          Showing {termLabel.toLowerCase()} {currentSemester} courses — set your level below to narrow the list.
+                          Showing {termLabel.toLowerCase()} {currentSemester} courses — set your level below to narrow the list. Your student record will be homed to this school.
                         </p>
                       )}
                     </div>
@@ -1193,25 +1202,16 @@ export default function StudentEnrollPage() {
                         </p>
                       ) : (
                         <>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-xs text-muted-foreground">
-                              <span className="font-semibold text-foreground">Level {level}</span>
-                              {' · '}
-                              {termLabel} {currentSemester}
-                            </p>
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
-                              <Checkbox
-                                checked={showOtherLevels}
-                                onCheckedChange={(v) => setShowOtherLevels(v === true)}
-                              />
-                              Show courses from other levels
-                            </label>
-                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-semibold text-foreground">Level {level}</span>
+                            {' · '}
+                            {termLabel} {currentSemester}
+                          </p>
 
                           {visibleSchoolDepartments.length === 0 ? (
                             <p className="text-xs text-muted-foreground italic py-3">
                               No {termLabel.toLowerCase()} {currentSemester} courses for Level {level} in this school
-                              yet. Turn on "Show courses from other levels" to include carry-over and elective courses.
+                              yet. Please check back later or contact your school&apos;s office.
                             </p>
                           ) : (
                             <div className="space-y-3 max-h-80 overflow-y-auto p-2 border rounded-xl bg-card">
@@ -1227,7 +1227,7 @@ export default function StudentEnrollPage() {
                                         <button
                                           type="button"
                                           key={c.id}
-                                          onClick={() => toggleSchoolCourse(c.id, dept.id)}
+                                          onClick={() => toggleSchoolCourse(c.id)}
                                           className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
                                             isChecked
                                               ? 'border-primary bg-primary/10 text-foreground'
@@ -1257,28 +1257,6 @@ export default function StudentEnrollPage() {
                               ))}
                             </div>
                           )}
-
-                          {/* Home department for the student record */}
-                          <div className="space-y-1.5 pt-1">
-                            <label className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                              Home Department *
-                            </label>
-                            <select
-                              value={selectedDeptId}
-                              onChange={(e) => setSelectedDeptId(e.target.value)}
-                              className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                            >
-                              <option value="">Select your home department…</option>
-                              {departments.map((d) => (
-                                <option key={d.id} value={d.id}>
-                                  {d.name}
-                                </option>
-                              ))}
-                            </select>
-                            <p className="text-[11px] text-muted-foreground">
-                              Your student record lives here; your selected courses may come from any department in the school.
-                            </p>
-                          </div>
                         </>
                       )
                     ) : (
@@ -1417,8 +1395,12 @@ export default function StudentEnrollPage() {
                   className="mt-0.5"
                 />
                 <label htmlFor="consent" className="text-xs text-foreground cursor-pointer leading-normal">
-                  <strong>I consent to biometric enrollment:</strong> I authorize the Department of{' '}
-                  {currentDept?.name} to record my facial vectors for verifying my attendance during academic lecture sessions.
+                  <strong>I consent to biometric enrollment:</strong>{' '}
+                  {schoolMode ? (
+                    <>I authorize <strong>{homeName}</strong> to record my facial vectors for verifying my attendance during academic lecture sessions.</>
+                  ) : (
+                    <>I authorize the Department of <strong>{currentDept?.name}</strong> to record my facial vectors for verifying my attendance during academic lecture sessions.</>
+                  )}
                 </label>
               </div>
 
@@ -1619,7 +1601,7 @@ export default function StudentEnrollPage() {
               <div className="space-y-2">
                 <h1 className="text-2xl font-bold tracking-tight">Submission Received!</h1>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Thank you, <strong>{firstName} {lastName}</strong> ({studentId}). Your facial biometric profile and course enrollment request have been received by the <strong>{currentDept?.name}</strong>.
+                  Thank you, <strong>{firstName} {lastName}</strong> ({studentId}). Your facial biometric profile and course enrollment request have been received by {schoolMode ? 'your' : 'the'} <strong>{homeName}</strong>.
                 </p>
               </div>
 
@@ -1639,7 +1621,7 @@ export default function StudentEnrollPage() {
                   <Sparkles className="h-4 w-4 text-primary" /> What Happens Next?
                 </p>
                 <p className="text-muted-foreground">
-                  Your Department Head or Course Lecturer will verify your registration. Once approved:
+                  Your Dean&apos;s office will verify your registration. Once approved:
                 </p>
                 <ul className="list-disc pl-4 space-y-1 text-muted-foreground">
                   <li>Your name will appear on all your registered course rosters.</li>

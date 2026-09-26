@@ -1,9 +1,20 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { ScanFace, UserRound, Camera } from 'lucide-react'
+import { ScanFace, UserRound, Camera, Check, Clock3, Eye, X } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import type { EnrollmentSubmission } from '@/lib/types'
 
 // ---------- Page header ----------
 
@@ -233,5 +244,182 @@ export function StatusPill({
     <Badge variant="outline" className={cn('text-[10px] font-semibold px-2', map[status])}>
       {status.charAt(0) + status.slice(1).toLowerCase()}
     </Badge>
+  )
+}
+
+// ---------- Enrollment request card (shared Dean / HoD queue) ----------
+
+const ENROLLMENT_STATUS_STYLE: Record<string, string> = {
+  PENDING: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  APPROVED: 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  REJECTED: 'border-destructive/30 bg-destructive/10 text-destructive',
+}
+
+const SLICE_CHIP_STYLE: Record<string, string> = {
+  PENDING: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  APPROVED: 'border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
+  REJECTED: 'border-destructive/30 bg-destructive/10 text-destructive',
+}
+
+/**
+ * Vertical mobile-first card for a student self-enrollment submission.
+ * Courses are grouped by owning department as scrollable rows (survives 6+
+ * courses), with per-department approval progress chips and a footer action
+ * slot rendered inside a 2-column grid.
+ */
+export function EnrollmentRequestCard({
+  submission,
+  actions,
+}: {
+  submission: EnrollmentSubmission
+  /** Footer action slot — rendered inside a grid-cols-2 container. */
+  actions?: React.ReactNode
+}) {
+  const [zoomOpen, setZoomOpen] = useState(false)
+
+  // Group requested courses by their owning department.
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; courses: { id: string; code: string; title: string }[] }>()
+    for (const c of submission.courses ?? []) {
+      const key = c.departmentId ?? '_none'
+      const name = c.departmentName ?? 'Other courses'
+      const group = map.get(key) ?? { key, name, courses: [] }
+      group.courses.push({ id: c.id, code: c.code, title: c.title })
+      map.set(key, group)
+    }
+    return Array.from(map.values())
+  }, [submission.courses])
+
+  return (
+    <div className="min-w-0 rounded-2xl border bg-card p-4">
+      {/* Header: photo, identity, status badge */}
+      <div className="flex min-w-0 items-start gap-3">
+        {submission.photoData ? (
+          <button
+            type="button"
+            onClick={() => setZoomOpen(true)}
+            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-primary/20 shadow-xs focus-visible:ring-2"
+            title="Tap to view full photo"
+          >
+            <img
+              src={submission.photoData}
+              alt={submission.firstName}
+              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+              <Eye className="h-4 w-4 text-white" />
+            </div>
+          </button>
+        ) : (
+          <IdentityAvatar name={`${submission.firstName} ${submission.lastName}`} className="h-12 w-12" />
+        )}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">
+                {submission.firstName} {submission.lastName}
+              </p>
+              <p className="truncate font-mono text-xs text-muted-foreground">{submission.studentId}</p>
+            </div>
+            <Badge
+              variant="outline"
+              className={cn('shrink-0 px-1.5 py-0 text-[10px] font-semibold uppercase', ENROLLMENT_STATUS_STYLE[submission.status])}
+            >
+              {submission.status}
+            </Badge>
+          </div>
+          <p className="truncate text-xs text-muted-foreground">{submission.email}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            Level {submission.level} · {submission.descriptorsCount || 3} poses ·{' '}
+            {new Date(submission.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+      </div>
+
+      {/* Per-department progress chips */}
+      {(submission.approvals?.length ?? 0) > 0 && (
+        <div className="mt-3 flex min-w-0 flex-wrap gap-1.5">
+          {submission.approvals!.map((a) => (
+            <span
+              key={a.id}
+              className={cn(
+                'inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                SLICE_CHIP_STYLE[a.status],
+              )}
+              title={a.status === 'REJECTED' && a.rejectionReason ? a.rejectionReason : a.departmentName ?? undefined}
+            >
+              {a.status === 'APPROVED' ? (
+                <Check className="h-3 w-3 shrink-0" />
+              ) : a.status === 'REJECTED' ? (
+                <X className="h-3 w-3 shrink-0" />
+              ) : (
+                <Clock3 className="h-3 w-3 shrink-0" />
+              )}
+              <span className="truncate">{a.departmentCode || a.departmentName || 'Department'}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Requested courses grouped by owning department */}
+      {groups.length > 0 ? (
+        <div className="mt-3 min-w-0 rounded-xl border bg-muted/30">
+          <div className="max-h-56 divide-y overflow-y-auto scrollbar-thin">
+            {groups.map((g) => (
+              <div key={g.key} className="min-w-0 space-y-1 px-3 py-2">
+                <p className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {g.name}
+                </p>
+                {g.courses.map((c) => (
+                  <div key={c.id} className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 font-mono text-[11px] font-bold text-foreground">{c.code}</span>
+                    <span className="min-w-0 truncate text-xs text-muted-foreground">{c.title}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : submission.courseIds.length > 0 ? (
+        <div className="mt-3 flex min-w-0 flex-wrap gap-1">
+          {submission.courseIds.map((cId) => (
+            <span
+              key={cId}
+              className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
+            >
+              {cId.slice(-6).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Footer action slot */}
+      {actions && <div className="mt-3 grid grid-cols-2 gap-2">{actions}</div>}
+
+      {/* Photo zoom dialog */}
+      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{submission.firstName} {submission.lastName}</DialogTitle>
+            <DialogDescription>Student enrollment facial capture preview</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-2">
+            {submission.photoData && (
+              <img
+                src={submission.photoData}
+                alt={`${submission.firstName} ${submission.lastName}`}
+                className="max-h-72 w-auto rounded-2xl object-cover border shadow-md"
+              />
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="w-full" onClick={() => setZoomOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }

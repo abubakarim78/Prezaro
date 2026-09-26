@@ -35,8 +35,9 @@ import {
   UserPlus,
   UserX,
   Users,
+  X,
 } from 'lucide-react'
-import type { AccessCode, DepartmentReport } from '@/lib/types'
+import type { AccessCode, DepartmentReport, EnrollmentSubmission } from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -64,6 +65,7 @@ import {
 import {
   AttendanceBar,
   EmptyState,
+  EnrollmentRequestCard,
   IdentityAvatar,
   LoadingBlock,
   PageHeader,
@@ -98,6 +100,12 @@ export default function AdminView() {
   const [codeSendEmailImmediately, setCodeSendEmailImmediately] = useState(true)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
+  // Enrollment requests addressed to this department (slice-based approvals)
+  const [submissions, setSubmissions] = useState<EnrollmentSubmission[]>([])
+  const [submissionsLoading, setSubmissionsLoading] = useState(false)
+  const [approvingSubId, setApprovingSubId] = useState<string | null>(null)
+  const [rejectingSubId, setRejectingSubId] = useState<string | null>(null)
+
   // Load department report
   useEffect(() => {
     ;(async () => {
@@ -127,6 +135,50 @@ export default function AdminView() {
   useEffect(() => {
     if (activeTab === 'codes') void loadCodes()
   }, [activeTab, loadCodes])
+
+  // Load enrollment requests addressed to this department
+  const loadSubmissions = useCallback(async () => {
+    setSubmissionsLoading(true)
+    try {
+      const data = await api<{ submissions: EnrollmentSubmission[] }>('/api/departments/enrollment-submissions')
+      setSubmissions(data.submissions)
+    } catch (e) {
+      toast.error('Failed to load enrollment requests: ' + getErrorMessage(e))
+    } finally {
+      setSubmissionsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'enrollments') void loadSubmissions()
+  }, [activeTab, loadSubmissions])
+
+  // Accept / decline this department's slice of a request
+  const handleReviewSubmission = async (submissionId: string, action: 'APPROVE' | 'REJECT') => {
+    if (action === 'APPROVE') setApprovingSubId(submissionId)
+    else setRejectingSubId(submissionId)
+    try {
+      const res = await api<{ finalized?: string }>('/api/departments/enrollment-submissions', {
+        method: 'PATCH',
+        body: { submissionId, action },
+      })
+      if (action === 'APPROVE') {
+        toast.success(
+          res.finalized === 'APPROVED'
+            ? 'Accepted — all departments agreed, student fully enrolled!'
+            : 'Courses accepted into your department'
+        )
+      } else {
+        toast.success(res.finalized === 'REJECTED' ? 'Request declined' : 'Courses declined for your department')
+      }
+      void loadSubmissions()
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setApprovingSubId(null)
+      setRejectingSubId(null)
+    }
+  }
 
   // Generate code action
   const handleGenerateCode = async () => {
@@ -235,6 +287,16 @@ export default function AdminView() {
 
   const trendData = useMemo(() => report?.trend ?? [], [report])
 
+  // Requests still awaiting this department's verdict
+  const myQueue = useMemo(
+    () => submissions.filter((s) => s.myStatus != null),
+    [submissions]
+  )
+  const pendingCount = useMemo(
+    () => myQueue.filter((s) => s.status === 'PENDING' && s.myStatus === 'PENDING').length,
+    [myQueue]
+  )
+
   const getPublicEnrollUrl = () => {
     if (typeof window === 'undefined') return '/enroll'
     const base = `${window.location.origin}/enroll`
@@ -283,6 +345,11 @@ export default function AdminView() {
               <UserCheck className="h-4 w-4 shrink-0" />
               <span className="hidden min-w-0 truncate sm:inline">Student Self-Enroll</span>
               <span className="min-w-0 truncate sm:hidden">Enrollments</span>
+              {pendingCount > 0 && (
+                <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                  {pendingCount}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -671,14 +738,66 @@ export default function AdminView() {
               </Button>
             </div>
 
-            {/* Approval moved to the Dean's office / super admins */}
-            <div className="rounded-2xl border bg-card">
-              <EmptyState
-                icon={ShieldCheck}
-                title="Approval is handled by the Dean's office"
-                description="Share the enrollment link with your students; their submissions are reviewed and approved by the Dean of your school or a super administrator. Approved students appear in your course rosters automatically."
-              />
-            </div>
+            {/* Live request queue — HoDs act on their own department's slice */}
+            {submissionsLoading ? (
+              <LoadingBlock label="Loading enrollment requests…" />
+            ) : myQueue.length === 0 ? (
+              <div className="rounded-2xl border bg-card">
+                <EmptyState
+                  icon={UserCheck}
+                  title="No enrollment requests yet"
+                  description="When students request courses owned by your department, their submissions arrive here for you to accept or decline. The Dean's office can still finalize cross-department enrollments."
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myQueue.map((sub) => {
+                  const actionable = sub.status === 'PENDING' && sub.myStatus === 'PENDING'
+                  const isApproving = approvingSubId === sub.id
+                  const isRejecting = rejectingSubId === sub.id
+
+                  return (
+                    <EnrollmentRequestCard
+                      key={sub.id}
+                      submission={sub}
+                      actions={
+                        actionable ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              className="min-h-11 gap-1 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => handleReviewSubmission(sub.id, 'REJECT')}
+                              disabled={isApproving || isRejecting}
+                            >
+                              {isRejecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                              Decline
+                            </Button>
+                            <Button
+                              className="min-h-11 gap-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={() => handleReviewSubmission(sub.id, 'APPROVE')}
+                              disabled={isApproving || isRejecting}
+                            >
+                              {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              Accept into {user?.departmentName ?? 'Dept'}
+                            </Button>
+                          </>
+                        ) : sub.myStatus === 'APPROVED' ? (
+                          <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-600/10 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            Accepted into {user?.departmentName ?? 'your department'}
+                          </div>
+                        ) : (
+                          <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border bg-muted/40 py-2.5 text-xs font-medium text-muted-foreground">
+                            <X className="h-3.5 w-3.5 shrink-0" />
+                            Declined for your department
+                          </div>
+                        )
+                      }
+                    />
+                  )
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

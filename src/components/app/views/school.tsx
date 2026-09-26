@@ -7,7 +7,6 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  Eye,
   GraduationCap,
   KeyRound,
   Link as LinkIcon,
@@ -52,7 +51,7 @@ import {
 } from '@/components/ui/select'
 import {
   EmptyState,
-  IdentityAvatar,
+  EnrollmentRequestCard,
   LoadingBlock,
   PageHeader,
   StatCard,
@@ -71,7 +70,6 @@ export default function SchoolView() {
   const [submissions, setSubmissions] = useState<EnrollmentSubmission[]>([])
   const [submissionsLoading, setSubmissionsLoading] = useState(false)
   const [submissionQuery, setSubmissionQuery] = useState('')
-  const [selectedPhoto, setSelectedPhoto] = useState<{ name: string; photoData: string } | null>(null)
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
 
@@ -222,7 +220,7 @@ export default function SchoolView() {
     }
   }
 
-  // Review submission action (Dean approval)
+  // Review submission action (Dean final say — approves/clears every slice)
   const handleReviewSubmission = async (submissionId: string, action: 'APPROVE' | 'REJECT') => {
     if (action === 'APPROVE') setApprovingId(submissionId)
     else setRejectingId(submissionId)
@@ -453,98 +451,22 @@ export default function SchoolView() {
                 />
               </div>
             ) : (
-              <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+              <div className="space-y-3">
                 {filteredSubmissions.map((sub) => {
                   const isPending = sub.status === 'PENDING'
                   const isApproving = approvingId === sub.id
                   const isRejecting = rejectingId === sub.id
 
                   return (
-                    <div key={sub.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {/* Student photo preview */}
-                        {sub.photoData ? (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPhoto({ name: `${sub.firstName} ${sub.lastName}`, photoData: sub.photoData! })}
-                            className="relative group h-12 w-12 rounded-full overflow-hidden shrink-0 border border-primary/20 shadow-xs focus-visible:ring-2"
-                            title="Click to view full photo"
-                          >
-                            <img
-                              src={sub.photoData}
-                              alt={sub.firstName}
-                              className="h-full w-full object-cover group-hover:scale-105 transition-transform"
-                            />
-                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
-                              <Eye className="h-4 w-4" />
-                            </div>
-                          </button>
-                        ) : (
-                          <IdentityAvatar name={`${sub.firstName} ${sub.lastName}`} className="h-12 w-12" />
-                        )}
-
-                        <div className="min-w-0 flex-1 space-y-0.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold text-sm truncate">
-                              {sub.firstName} {sub.lastName}
-                            </p>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              ({sub.studentId})
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'text-[10px] uppercase font-semibold px-1.5 py-0',
-                                sub.status === 'PENDING' && 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-                                sub.status === 'APPROVED' && 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-                                sub.status === 'REJECTED' && 'border-destructive/30 bg-destructive/10 text-destructive'
-                              )}
-                            >
-                              {sub.status}
-                            </Badge>
-                          </div>
-
-                          <p className="text-xs text-muted-foreground truncate">
-                            {sub.email} • Level {sub.level} • Home: {sub.departmentName ?? '—'} • {sub.descriptorsCount || 3} Poses
-                          </p>
-
-                          {sub.courses && sub.courses.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {sub.courses.map((c) => (
-                                <span
-                                  key={c.id}
-                                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary"
-                                >
-                                  <BookOpen className="h-3 w-3" />
-                                  {c.code}
-                                  <span className="font-sans font-normal text-muted-foreground truncate max-w-[130px]">
-                                    · {c.departmentName ? `${c.departmentName} — ` : ''}{c.title}
-                                  </span>
-                                </span>
-                              ))}
-                            </div>
-                          ) : sub.courseIds && sub.courseIds.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {sub.courseIds.map((cId) => (
-                                <span
-                                  key={cId}
-                                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
-                                >
-                                  {cId.slice(-6).toUpperCase()}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                        {isPending ? (
+                    <EnrollmentRequestCard
+                      key={sub.id}
+                      submission={sub}
+                      actions={
+                        isPending ? (
                           <>
                             <Button
                               variant="outline"
-                              size="sm"
-                              className="h-9 gap-1 text-xs text-destructive hover:bg-destructive/10"
+                              className="min-h-11 gap-1 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => handleReviewSubmission(sub.id, 'REJECT')}
                               disabled={isApproving || isRejecting}
                             >
@@ -552,8 +474,7 @@ export default function SchoolView() {
                               Reject
                             </Button>
                             <Button
-                              size="sm"
-                              className="h-9 gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                              className="min-h-11 gap-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
                               onClick={() => handleReviewSubmission(sub.id, 'APPROVE')}
                               disabled={isApproving || isRejecting}
                             >
@@ -562,12 +483,12 @@ export default function SchoolView() {
                             </Button>
                           </>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {sub.reviewedAt ? new Date(sub.reviewedAt).toLocaleDateString() : 'Reviewed'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                          <div className="col-span-2 flex items-center justify-center rounded-xl border bg-muted/40 py-2.5 text-xs text-muted-foreground">
+                            {sub.reviewedAt ? `Reviewed ${new Date(sub.reviewedAt).toLocaleDateString()}` : 'Reviewed'}
+                          </div>
+                        )
+                      }
+                    />
                   )
                 })}
               </div>
@@ -863,30 +784,6 @@ export default function SchoolView() {
               </DialogFooter>
             </>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* DIALOG: PHOTO ZOOM PREVIEW */}
-      <Dialog open={!!selectedPhoto} onOpenChange={(open) => !open && setSelectedPhoto(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{selectedPhoto?.name}</DialogTitle>
-            <DialogDescription>Student enrollment facial capture preview</DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-center p-2">
-            {selectedPhoto && (
-              <img
-                src={selectedPhoto.photoData}
-                alt={selectedPhoto.name}
-                className="max-h-72 w-auto rounded-2xl object-cover border shadow-md"
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="w-full" onClick={() => setSelectedPhoto(null)}>
-              Close
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

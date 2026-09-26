@@ -19,6 +19,7 @@ export type EmailType =
   | 'ACCOUNT_ALERT'
   | 'STUDENT_REGISTERED'
   | 'COURSE_ENROLLMENT'
+  | 'ENROLLMENT_REQUEST'
   | 'CLASS_REMINDER'
   | 'CLASS_RESCHEDULED'
   | 'ACCESS_CODE_INVITE'
@@ -271,6 +272,31 @@ export function courseEnrollmentHtml(
     row(`Hi ${escapeHtml(name)} — you have been enrolled in a new course on ${BRAND.name}:`) +
       highlight(`<strong>${escapeHtml(courseCode)} — ${escapeHtml(courseTitle)}</strong><br/>Lecturer: ${escapeHtml(lecturerName)}<br/>Your index number: ${escapeHtml(studentIndex)}`) +
       row('Your attendance for this course will be recorded automatically during lectures once your face is enrolled, or manually by your lecturer.'),
+  )
+}
+
+export function enrollmentRequestHtml(
+  studentName: string,
+  studentIndex: string,
+  departmentName: string,
+  schoolName: string | null,
+  courses: { code: string; title: string }[],
+): string {
+  const courseRows = courses
+    .map(
+      (c) =>
+        `<tr><td style="padding:4px 0;font:14px/1.5 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${BRAND.text};"><span style="font-family:monospace;font-weight:700;">${escapeHtml(c.code)}</span> &nbsp;${escapeHtml(c.title)}</td></tr>`,
+    )
+    .join('')
+  return layout(
+    `New enrollment request for ${escapeHtml(departmentName)}`,
+    row(`<strong>${escapeHtml(studentName)}</strong> (${escapeHtml(studentIndex)})${schoolName ? ` of <strong>${escapeHtml(schoolName)}</strong>` : ''} has requested to enroll in courses owned by <strong>${escapeHtml(departmentName)}</strong>.`) +
+      highlight(`
+        <div style="font-size:12px;color:${BRAND.muted};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Requested courses</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${courseRows}</table>
+      `) +
+      row('Open the department dashboard → Student Self-Enroll to accept or decline this request. Other department heads review their own courses independently; the Dean\u2019s office can finalize the enrollment at any time.'),
+    'Prezaro enrollment request notification.',
   )
 }
 

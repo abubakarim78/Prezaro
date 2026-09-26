@@ -47,6 +47,7 @@ model School {
   users         User[]
   accessCodes   AccessCode[]
   submissions   EnrollmentSubmission[]
+  students      Student[]
 
   @@unique([name, institutionId])
 }
@@ -65,6 +66,7 @@ model Department {
   students      Student[]
   accessCodes   AccessCode[]
   submissions   EnrollmentSubmission[]
+  approvals     EnrollmentApproval[]
 
   @@unique([name, institutionId])
 }
@@ -88,6 +90,7 @@ model User {
   sessions      Session[]    @relation("SessionLecturer")
   schedules     ClassSchedule[]
   codesCreated  AccessCode[] @relation("CodesCreated")
+  approvalReviews EnrollmentApproval[] @relation("EnrollmentApprovalReviewer")
   codeClaimedId String?
   codeClaimed   AccessCode?  @relation("CodesClaimed", fields: [codeClaimedId], references: [id], onDelete: SetNull)
   createdAt     DateTime     @default(now())
@@ -122,6 +125,10 @@ model Student {
   phone           String?
   departmentId    String?
   department      Department?        @relation(fields: [departmentId], references: [id])
+  // School-first flow: self-enrolled students are homed to their School /
+  // Faculty and may have no department at all.
+  schoolId        String?
+  school          School?            @relation(fields: [schoolId], references: [id])
   descriptorsJson String             @default("[]") // JSON array of 128-d face descriptors
   photoData       String?            // enrollment reference photo (JPEG data URL)
   faceEnrolledAt  DateTime?
@@ -202,8 +209,9 @@ model EnrollmentSubmission {
   email           String
   phone           String?
   level           Int         @default(100)
-  departmentId    String
-  department      Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  // Optional in the school-first flow — students are homed to their school.
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   schoolId        String?
   school          School?     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   courseIdsJson   String      @default("[]") // JSON string array of course codes/IDs
@@ -214,20 +222,42 @@ model EnrollmentSubmission {
   rejectionReason String?
   createdAt       DateTime    @default(now())
   reviewedAt      DateTime?
+  approvals       EnrollmentApproval[]
 
   @@index([departmentId, status])
   @@index([schoolId, status])
 }
 
+// One independent approval slice per department that owns requested courses.
+// Each HoD reviews only their own row; the Dean has final say and can
+// approve/reject the whole submission at once.
+model EnrollmentApproval {
+  id              String                @id @default(cuid())
+  submissionId    String
+  submission      EnrollmentSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  departmentId    String
+  department      Department            @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  status          String                @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewerId      String?
+  reviewer        User?                 @relation("EnrollmentApprovalReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  rejectionReason String?
+  reviewedAt      DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@unique([submissionId, departmentId])
+  @@index([departmentId, status])
+}
+
 // Outbox log of every notification email the system produces.
 // When SMTP env vars are absent, emails are stored as SIMULATED
-// (visible in Settings → Email notifications) instead of delivered.
+// (queryable via /api/emails) instead of delivered.
 model EmailLog {
   id        String   @id @default(cuid())
   to        String
   subject   String
   bodyHtml  String
-  type      String   // WELCOME | ACCOUNT_ALERT | STUDENT_REGISTERED | COURSE_ENROLLMENT | TEST
+  type      String   // WELCOME | ACCOUNT_ALERT | STUDENT_REGISTERED | COURSE_ENROLLMENT | ENROLLMENT_REQUEST | TEST
   status    String   @default("SIMULATED") // SENT | SIMULATED | FAILED
   error     String?
   metaJson  String   @default("{}")

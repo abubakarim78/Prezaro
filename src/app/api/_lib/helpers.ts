@@ -340,7 +340,11 @@ export function serializeSchedule(s: any): ClassSchedule {
 export function studentScopeWhere(user: AuthUser): Prisma.StudentWhereInput {
   if (user.role === 'SUPERADMIN') return {}
   if (user.role === 'DEAN' && user.schoolId) {
-    return { department: { schoolId: user.schoolId } }
+    // Department-rostered students plus school-homed self-enrollments
+    // (school-first flow students have no department at all).
+    return {
+      OR: [{ department: { schoolId: user.schoolId } }, { schoolId: user.schoolId }],
+    }
   }
   return { departmentId: user.departmentId }
 }

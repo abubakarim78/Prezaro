@@ -462,3 +462,23 @@ Work Log:
 Stage Summary:
 - Deployments now self-diagnose non-persistent storage at startup instead of silently recreating a fresh DB (bootstrap also silently recreates the admin on an empty DB, which masked the wipe).
 - User data in the dev sandbox confirmed untouched by any E2E cleanup (only throwaway entities deleted each task).
+
+---
+Task ID: 29
+Agent: Qoder
+Task: Implement the pending enrollment-approvals plan (slice-based HoD approvals + shared EnrollmentRequestCard + Dean final say + settings email section removal).
+
+Work Log:
+- prisma/schema.prisma: new EnrollmentApproval model (submissionId+departmentId @@unique, status PENDING|APPROVED|REJECTED, reviewerId, rejectionReason, reviewedAt) with back-relations on EnrollmentSubmission.approvals / Department.approvals / User.approvalReviews; db pushed, client regenerated.
+- src/lib/email.ts: EmailType gains ENROLLMENT_REQUEST; new enrollmentRequestHtml() branded template listing requested courses per department.
+- enrollment-submissions API: POST groups picked courses by owning department, creates one PENDING approval slice per department (createMany skipDuplicates) and queueEmails every such department's ADMIN (HoD) users. GET now allows ADMIN (HoD queue scoped by approvals.some.departmentId = own dept) alongside DEAN (school-wide) and SUPERADMIN; response adds course.departmentId, approvals[], myStatus, myDepartmentId. PATCH split: ADMIN acts only on their own PENDING slice of a PENDING submission (accept enrolls just their dept's courses; first acceptance creates the Student homed to the accepting HoD's dept + schoolId; later acceptances never steal the home dept; unanimous APPROVED auto-finalizes, unanimous REJECTED finalizes REJECTED, mixed stays PENDING). DEAN/SUPERADMIN approve = final say: enrolls ALL requested courses, marks EVERY slice APPROVED (HoD queues clear instantly), finalizes APPROVED; Dean reject closes PENDING slices, leaves accepted slices + enrollments intact.
+- src/components/app/shared.tsx: new shared EnrollmentRequestCard — vertical mobile-first card, min-w-0 chain, photo tap-to-zoom dialog, status badge top-right, per-department progress chips, courses grouped by owning department as scrollable rows (max-h-56, survives 6+ courses), footer action slot in grid-cols-2.
+- admin.tsx Enrollments tab: Dean-only EmptyState replaced by the live HoD request queue (pending badge on the tab, Accept into {Dept} / Decline buttons, resolved states show accepted/declined chips); uses the shared card.
+- school.tsx Approvals tab: inline row layout replaced by the shared card with progress chips (accepted departments show as resolved chips; approve targets remaining pending via server logic); photo-zoom dialog + selectedPhoto state removed (card owns it).
+- settings.tsx: ADMIN-only "Email notifications" section deleted (delivery mode, send test, delivery log, email preview dialog) with all dead state/consts/imports (loadEmails, sendTest, EMAIL_TYPE_LABEL, EMAIL_STATUS_STYLE, date-fns format, Mail/RefreshCw/Send/Loader2 icons, EmailLogItem/EmailsResponse/TestEmailResponse types). /api/emails routes kept.
+
+Verify: bun run db:push OK; bunx tsc --noEmit clean; bun run lint clean (eslint exit 0).
+
+Stage Summary:
+- Enrollment approval is now slice-based: each HoD independently accepts/declines their department's courses; the Dean retains final say and instantly clears all queues on approve; students, enrollments and email notifications follow the slices.
+- Settings no longer surfaces the email outbox (API surface unchanged).

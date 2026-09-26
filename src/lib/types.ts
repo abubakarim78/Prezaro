@@ -436,6 +436,19 @@ export interface AccessCode {
   createdAt: string
 }
 
+export type EnrollmentApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+export interface EnrollmentApprovalView {
+  id: string
+  departmentId: string
+  departmentName?: string | null
+  departmentCode?: string | null
+  status: EnrollmentApprovalStatus
+  rejectionReason?: string | null
+  reviewerId?: string | null
+  reviewedAt?: string | null
+}
+
 export interface EnrollmentSubmission {
   id: string
   studentId: string
@@ -444,17 +457,22 @@ export interface EnrollmentSubmission {
   email: string
   phone?: string | null
   level: number
-  departmentId: string
-  departmentName?: string
+  departmentId?: string | null
+  departmentName?: string | null
   schoolId?: string | null
   schoolName?: string | null
   courseIds: string[]
-  courses?: { id: string; code: string; title: string; departmentName?: string | null }[]
+  courses?: { id: string; code: string; title: string; departmentId?: string | null; departmentName?: string | null }[]
   photoData?: string | null
   descriptorsCount: number
   consentGiven: boolean
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   rejectionReason?: string | null
+  // Slice-based approvals: one row per department owning requested courses.
+  approvals?: EnrollmentApprovalView[]
+  // The current reviewer's own slice status (ADMIN/HoD) — null otherwise.
+  myStatus?: EnrollmentApprovalStatus | null
+  myDepartmentId?: string | null
   createdAt: string
   reviewedAt?: string | null
 }
