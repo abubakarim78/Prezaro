@@ -27,6 +27,7 @@ import {
   Plus,
   QrCode,
   ShieldCheck,
+  Sparkles,
   Ticket,
   Trash2,
   TrendingUp,
@@ -63,6 +64,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  accessCodeRoleLabel,
   AttendanceBar,
   EmptyState,
   EnrollmentRequestCard,
@@ -97,6 +99,9 @@ export default function AdminView() {
   // Enrollment share-link state (submission approval moved to the Dean's office)
   const [shareLinkOpen, setShareLinkOpen] = useState(false)
   const [selectedShareCourseId, setSelectedShareCourseId] = useState<string>('all')
+  // Optional cohort scoping for the shared link (?level=&semester=)
+  const [shareLinkLevel, setShareLinkLevel] = useState('any')
+  const [shareLinkTerm, setShareLinkTerm] = useState('current')
   const [codeSendEmailImmediately, setCodeSendEmailImmediately] = useState(true)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
@@ -299,12 +304,21 @@ export default function AdminView() {
 
   const getPublicEnrollUrl = () => {
     if (typeof window === 'undefined') return '/enroll'
-    const base = `${window.location.origin}/enroll`
+    const params = new URLSearchParams()
     if (selectedShareCourseId && selectedShareCourseId !== 'all') {
-      return `${base}?course=${selectedShareCourseId}`
+      params.set('course', selectedShareCourseId)
+    } else if (user?.departmentId) {
+      params.set('dept', user.departmentId)
     }
-    const deptId = user?.departmentId
-    return deptId ? `${base}?dept=${deptId}` : base
+    // Scoped cohort invite: the level applies to the department-wide link
+    // (a course link already follows its own course's level); the term
+    // applies to both shapes.
+    if ((!selectedShareCourseId || selectedShareCourseId === 'all') && shareLinkLevel !== 'any') {
+      params.set('level', shareLinkLevel)
+    }
+    if (shareLinkTerm !== 'current') params.set('semester', shareLinkTerm)
+    const qs = params.toString()
+    return `${window.location.origin}/enroll${qs ? `?${qs}` : ''}`
   }
 
   return (
@@ -638,7 +652,7 @@ export default function AdminView() {
                             {c.status}
                           </Badge>
                           <span className="text-[11px] font-medium text-muted-foreground">
-                            {c.role === 'ADMIN' ? 'Dept Admin / HOD' : 'Lecturer'}
+                            {accessCodeRoleLabel(c.role)}
                           </span>
                         </div>
 
@@ -778,7 +792,7 @@ export default function AdminView() {
                               disabled={isApproving || isRejecting}
                             >
                               {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              Accept into {user?.departmentName ?? 'Dept'}
+                              Accept
                             </Button>
                           </>
                         ) : sub.myStatus === 'APPROVED' ? (
@@ -952,6 +966,61 @@ export default function AdminView() {
               </Select>
             </div>
 
+            {/* Optional level + term scoping — wraps the link to one cohort */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5 min-w-0">
+                <label className="text-xs font-semibold text-foreground">
+                  Level
+                </label>
+                <Select
+                  value={shareLinkLevel}
+                  onValueChange={setShareLinkLevel}
+                  disabled={!!selectedShareCourseId && selectedShareCourseId !== 'all'}
+                >
+                  <SelectTrigger className="w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any level</SelectItem>
+                    {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                      <SelectItem key={l} value={String(l)}>
+                        Level {l}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5 min-w-0">
+                <label className="text-xs font-semibold text-foreground">
+                  Term
+                </label>
+                <Select value={shareLinkTerm} onValueChange={setShareLinkTerm}>
+                  <SelectTrigger className="w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current">Current (default)</SelectItem>
+                    {[1, 2, 3, 4].map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        Term {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {(shareLinkLevel !== 'any' || shareLinkTerm !== 'current') && (
+              <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Scoped invite — students land with{' '}
+                  {shareLinkLevel !== 'any' ? `Level ${shareLinkLevel}` : 'any level'}
+                  {shareLinkTerm !== 'current' ? ` · Term ${shareLinkTerm}` : ''} preselected and
+                  locked, so they see only that cohort&apos;s courses.
+                </span>
+              </p>
+            )}
+
             <div className="rounded-xl border bg-muted/40 p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-foreground min-w-0">
@@ -982,10 +1051,10 @@ export default function AdminView() {
                 <Info className="h-4 w-4 text-primary" /> Student Experience:
               </p>
               <ul className="list-disc pl-4 space-y-0.5">
-                <li>Students enter their student ID, full name, and level.</li>
+                <li>Students enter their student ID and name; a scoped link pre-locks their level and term.</li>
                 <li>The browser camera guides them through 3 face poses (center, tilt right, tilt left).</li>
                 <li>Face descriptors are computed directly on device for privacy.</li>
-                <li>Submissions go to the Dean's office (or a super administrator) for approval.</li>
+                <li>Submissions arrive for review by your department and the Dean&apos;s office.</li>
               </ul>
             </div>
           </div>

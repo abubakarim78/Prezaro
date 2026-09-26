@@ -13,6 +13,7 @@
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
 import { db } from '@/lib/db'
+import { EMBLEM_LOGO_BASE64, EMBLEM_LOGO_CID } from '@/lib/email-logo'
 
 export type EmailType =
   | 'WELCOME'
@@ -122,6 +123,14 @@ export async function sendAppEmail(email: OutgoingEmail): Promise<
             to: [email.to],
             subject: email.subject,
             html: email.html,
+            // Inline brand emblem — referenced from the HTML as cid:prezaro-emblem
+            attachments: [
+              {
+                filename: `${EMBLEM_LOGO_CID}.png`,
+                content: EMBLEM_LOGO_BASE64,
+                content_id: EMBLEM_LOGO_CID,
+              },
+            ],
           }),
         })
         if (!res.ok) {
@@ -138,6 +147,16 @@ export async function sendAppEmail(email: OutgoingEmail): Promise<
           to: email.to,
           subject: email.subject,
           html: email.html,
+          // Inline brand emblem — referenced from the HTML as cid:prezaro-emblem
+          attachments: [
+            {
+              filename: `${EMBLEM_LOGO_CID}.png`,
+              content: EMBLEM_LOGO_BASE64,
+              encoding: 'base64',
+              cid: EMBLEM_LOGO_CID,
+              contentDisposition: 'inline',
+            },
+          ],
         })
       }
       delivery = 'SENT'
@@ -199,9 +218,16 @@ function layout(title: string, bodyRows: string, footerNote?: string): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8faf4;padding:32px 12px;">
 <tr><td align="center">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid ${BRAND.border};border-radius:16px;overflow:hidden;">
-    <tr><td style="background:${BRAND.color};padding:22px 28px;">
+    <tr><td style="background:${BRAND.color};padding:18px 28px;">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-        <td style="font:700 18px/1 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#ffffff;letter-spacing:0.2px;">&#128065;&#65039; ${BRAND.name}</td>
+        <td style="padding-right:10px;vertical-align:middle;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="background:#ffffff;border-radius:8px;padding:4px;">
+              <img src="cid:${EMBLEM_LOGO_CID}" width="24" height="24" alt="${BRAND.name}" style="display:block;border:0;outline:none;text-decoration:none;" />
+            </td>
+          </tr></table>
+        </td>
+        <td style="font:700 18px/1 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#ffffff;letter-spacing:0.2px;vertical-align:middle;">${BRAND.name}</td>
       </tr></table>
     </td></tr>
     <tr><td style="padding:26px 28px 4px;font:700 20px/1.3 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${BRAND.text};">${title}</td></tr>
@@ -361,7 +387,12 @@ export function accessCodeInvitationHtml(
   expiresAt: string | null,
   directLink: string,
 ): string {
-  const roleLabel = role === 'ADMIN' ? 'Department Administrator / Head of Department' : 'Lecturer'
+  const roleLabel =
+    role === 'ADMIN'
+      ? 'Department Administrator / Head of Department'
+      : role === 'DEAN'
+        ? 'Dean / Faculty Administrator'
+        : 'Lecturer'
   const greeting = name ? `Dear ${escapeHtml(name)},` : 'Hello,'
   return layout(
     `Prezaro Invitation: Access Code for ${escapeHtml(departmentName)}`,

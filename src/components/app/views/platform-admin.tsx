@@ -169,6 +169,29 @@ export default function PlatformAdminView() {
   const [deanName, setDeanName] = useState('')
   const [deanEmail, setDeanEmail] = useState('')
   const [invitingDean, setInvitingDean] = useState(false)
+
+  // Scoped school enrollment link (level/term) for the manage-school sheet
+  const [schoolLinkLevel, setSchoolLinkLevel] = useState('any')
+  const [schoolLinkTerm, setSchoolLinkTerm] = useState('current')
+
+  // Builds the (optionally scoped) /enroll link for the school being managed.
+  const schoolEnrollUrl = () => {
+    if (typeof window === 'undefined' || !manageSchool) return ''
+    const params = new URLSearchParams()
+    params.set('school', manageSchool.code || manageSchool.id)
+    if (schoolLinkLevel !== 'any') params.set('level', schoolLinkLevel)
+    if (schoolLinkTerm !== 'current') params.set('semester', schoolLinkTerm)
+    const qs = params.toString()
+    return `${window.location.origin}/enroll?${qs}`
+  }
+  const schoolTermLabel =
+    manageSchool?.termSystem === 'TRIMESTER'
+      ? 'Trimester'
+      : manageSchool?.termSystem === 'QUARTER'
+        ? 'Quarter'
+        : 'Semester'
+  const schoolTermCount =
+    manageSchool?.termSystem === 'TRIMESTER' ? 3 : manageSchool?.termSystem === 'QUARTER' ? 4 : 2
   const [deanResult, setDeanResult] = useState<{ code: string; emailed: boolean } | null>(null)
 
   // Institutions Filters & search
@@ -2862,10 +2885,51 @@ export default function PlatformAdminView() {
                   <ExternalLink className="h-3.5 w-3.5" />
                   School enrollment link
                 </h3>
+
+                {/* Optional level + term scoping — wraps the link to one cohort */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1 min-w-0">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Level
+                    </label>
+                    <Select value={schoolLinkLevel} onValueChange={setSchoolLinkLevel}>
+                      <SelectTrigger className="h-9 w-full min-w-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="any">Any level</SelectItem>
+                        {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                          <SelectItem key={l} value={String(l)}>
+                            Level {l}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Term
+                    </label>
+                    <Select value={schoolLinkTerm} onValueChange={setSchoolLinkTerm}>
+                      <SelectTrigger className="h-9 w-full min-w-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="current">Current (default)</SelectItem>
+                        {Array.from({ length: schoolTermCount }, (_, i) => i + 1).map((n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {schoolTermLabel} {n}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
                 <div className="flex gap-2">
                   <Input
                     readOnly
-                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/enroll?school=${manageSchool.code || manageSchool.id}`}
+                    value={schoolEnrollUrl()}
                     className="min-w-0 flex-1 font-mono text-xs"
                   />
                   <Button
@@ -2873,19 +2937,29 @@ export default function PlatformAdminView() {
                     variant="outline"
                     className="shrink-0 gap-1"
                     onClick={() => {
-                      void navigator.clipboard.writeText(
-                        `${window.location.origin}/enroll?school=${manageSchool.code || manageSchool.id}`
-                      )
+                      void navigator.clipboard.writeText(schoolEnrollUrl())
                       toast.success('School enrollment link copied')
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Students opening this link land on the school preselected; they still pick their
-                  level and see only this school&apos;s courses for the current term.
-                </p>
+                {(schoolLinkLevel !== 'any' || schoolLinkTerm !== 'current') ? (
+                  <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Scoped invite — students land with{' '}
+                      {schoolLinkLevel !== 'any' ? `Level ${schoolLinkLevel}` : 'any level'}
+                      {schoolLinkTerm !== 'current' ? ` · ${schoolTermLabel} ${schoolLinkTerm}` : ''}{' '}
+                      preselected and locked, so they see only that cohort&apos;s courses.
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Students opening this link land on the school preselected; they still pick their
+                    level and see only this school&apos;s courses for the current term.
+                  </p>
+                )}
               </section>
             </div>
           )}

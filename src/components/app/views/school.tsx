@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Ticket,
   Trash2,
   TriangleAlert,
@@ -50,6 +51,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  accessCodeRoleLabel,
   EmptyState,
   EnrollmentRequestCard,
   LoadingBlock,
@@ -88,6 +90,12 @@ export default function SchoolView() {
   const [invitedCode, setInvitedCode] = useState<AccessCode | null>(null)
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
+
+  // School enrollment link scoping — the Dean can wrap the invite to one
+  // level and term so students land on a pre-filtered course list.
+  const [linkLevel, setLinkLevel] = useState('any')
+  const [linkTerm, setLinkTerm] = useState('current')
+  const [termInfo, setTermInfo] = useState<{ termSystem: string; currentSemester: number } | null>(null)
 
   // Load school departments
   const loadDepartments = useCallback(async () => {
@@ -137,6 +145,28 @@ export default function SchoolView() {
     if (activeTab === 'approvals') void loadSubmissions()
     if (activeTab === 'access') void loadCodes()
   }, [activeTab, loadSubmissions, loadCodes])
+
+  // Term labels for the scoped-link selects (institution-level config, read
+  // from the public school listing; falls back to Semester / 1 on failure).
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const data = await api<{ schools: { id: string; termSystem: string; currentSemester: number }[] }>(
+          '/api/departments/public?list=schools'
+        )
+        const mine = data.schools.find((s) => s.id === user?.schoolId)
+        if (alive && mine) {
+          setTermInfo({ termSystem: mine.termSystem, currentSemester: mine.currentSemester })
+        }
+      } catch {
+        // labels fall back below
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [user?.schoolId])
 
   // Invite HoD / lecturer action (DEAN codes mint ADMIN/LECTURER within the school)
   const handleInvite = async () => {
@@ -251,10 +281,20 @@ export default function SchoolView() {
     toast.success(`${label} copied to clipboard!`)
   }
 
+  const termSystem = termInfo?.termSystem ?? 'SEMESTER'
+  const termLabel = termSystem === 'TRIMESTER' ? 'Trimester' : termSystem === 'QUARTER' ? 'Quarter' : 'Semester'
+  const termCount = termSystem === 'TRIMESTER' ? 3 : termSystem === 'QUARTER' ? 4 : 2
+  const linkScoped = linkLevel !== 'any' || linkTerm !== 'current'
+
   const getSchoolEnrollUrl = () => {
     if (typeof window === 'undefined') return '/enroll'
+    const params = new URLSearchParams()
     const token = user?.schoolCode || user?.schoolId
-    return token ? `${window.location.origin}/enroll?school=${token}` : `${window.location.origin}/enroll`
+    if (token) params.set('school', token)
+    if (linkLevel !== 'any') params.set('level', linkLevel)
+    if (linkTerm !== 'current') params.set('semester', linkTerm)
+    const qs = params.toString()
+    return `${window.location.origin}/enroll${qs ? `?${qs}` : ''}`
   }
 
   const totals = useMemo(() => {
@@ -361,17 +401,73 @@ export default function SchoolView() {
                   variant="outline"
                   size="sm"
                   className="h-9 gap-1.5 text-xs font-semibold"
-                  onClick={() => copyText(getSchoolEnrollUrl(), 'School Enrollment Link')}
+                  onClick={() =>
+                    copyText(getSchoolEnrollUrl(), linkScoped ? 'Scoped School Enrollment Link' : 'School Enrollment Link')
+                  }
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy Link
                 </Button>
               </div>
+
+              {/* Optional level + term scoping — narrows the student's course list */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1 min-w-0">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Level
+                  </label>
+                  <Select value={linkLevel} onValueChange={setLinkLevel}>
+                    <SelectTrigger className="h-9 w-full min-w-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Any level</SelectItem>
+                      {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                        <SelectItem key={l} value={String(l)}>
+                          Level {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Term
+                  </label>
+                  <Select value={linkTerm} onValueChange={setLinkTerm}>
+                    <SelectTrigger className="h-9 w-full min-w-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="current">Current (default)</SelectItem>
+                      {Array.from({ length: termCount }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {termLabel} {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
               <p className="min-w-0 rounded-lg border bg-muted/40 px-3 py-2.5 font-mono text-xs break-all">
                 {getSchoolEnrollUrl()}
               </p>
-              <p className="text-[11px] text-muted-foreground">
-                Students who open this link land on the school preselected. They pick their level and register courses from any department in the school; submissions arrive in your Approvals queue.
-              </p>
+              {linkScoped ? (
+                <p className="text-[11px] text-primary flex items-start gap-1.5">
+                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Scoped invite — students land with{' '}
+                    {linkLevel !== 'any' ? `Level ${linkLevel}` : 'any level'}
+                    {' · '}
+                    {linkTerm !== 'current' ? `${termLabel} ${linkTerm}` : `the current ${termLabel.toLowerCase()}`}{' '}
+                    preselected and locked, so they see only that cohort&apos;s courses.
+                  </span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Students who open this link land on the school preselected. They pick their level and register courses from any department in the school; submissions arrive in your Approvals queue. Scope it to a level and term above for cohort-specific invites.
+                </p>
+              )}
             </div>
 
             {/* Departments */}
@@ -479,7 +575,7 @@ export default function SchoolView() {
                               disabled={isApproving || isRejecting}
                             >
                               {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              Approve &amp; Enroll
+                              Accept
                             </Button>
                           </>
                         ) : (
@@ -548,7 +644,7 @@ export default function SchoolView() {
                             {c.status}
                           </Badge>
                           <span className="text-[11px] font-medium text-muted-foreground">
-                            {c.role === 'ADMIN' ? 'Dept Admin / HOD' : 'Lecturer'}
+                            {accessCodeRoleLabel(c.role)}
                           </span>
                         </div>
 
@@ -654,7 +750,7 @@ export default function SchoolView() {
                   {invitedCode.code}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  {invitedCode.role === 'ADMIN' ? 'Department Admin / HoD' : 'Lecturer'} — share this code or the invite link. The recipient claims it on first login.
+                  {accessCodeRoleLabel(invitedCode.role)} — share this code or the invite link. The recipient claims it on first login.
                 </p>
               </div>
               <Button

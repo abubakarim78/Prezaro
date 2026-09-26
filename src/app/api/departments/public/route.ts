@@ -200,6 +200,7 @@ export async function GET(req: Request) {
             code: true,
             title: true,
             level: true,
+            semester: true,
           },
           orderBy: { code: 'asc' },
         },
@@ -217,6 +218,7 @@ export async function GET(req: Request) {
         code: c.code,
         title: c.title,
         level: c.level,
+        semester: c.semester,
       })),
     }))
 

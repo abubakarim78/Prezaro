@@ -153,6 +153,15 @@ export default function StudentEnrollPage() {
   const [isLegacyLink, setIsLegacyLink] = useState(false)
   const [loadingSchool, setLoadingSchool] = useState(false)
 
+  // Scoped invitation links (?level=&semester=): when present, the invite
+  // locks the level and/or overrides the institution's current term so the
+  // student only sees that cohort's courses.
+  const [linkLevel, setLinkLevel] = useState<number | null>(null)
+  const [linkSemester, setLinkSemester] = useState<number | null>(null)
+  // True when the link itself carries ?school= — the School/Faculty is then
+  // preselected (and locked) for the student instead of hand-picked.
+  const [linkSchool, setLinkSchool] = useState(false)
+
   // Form Fields
   const [selectedDeptId, setSelectedDeptId] = useState('')
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([])
@@ -246,25 +255,48 @@ export default function StudentEnrollPage() {
   }
 
   // Load a school's full department/course catalog for the school-first flow.
-  const loadSchoolCatalog = async (schoolToken: string) => {
+  // Returns true when the school resolved — callers fall back to the legacy
+  // department picker only when a scoped link points at a missing school.
+  const loadSchoolCatalog = async (schoolToken: string): Promise<boolean> => {
     setLoadingSchool(true)
     try {
       const res = await fetch(`/api/departments/public?school=${encodeURIComponent(schoolToken)}`)
       const data = await res.json()
-      if (data.school) {
-        setDepartments(data.departments ?? [])
-        setSelectedSchoolId(data.school.id)
-        setSchoolInfo({
-          termSystem: data.school.termSystem ?? 'SEMESTER',
-          currentSemester: data.school.currentSemester ?? 1,
-        })
-        setSelectedCourseIds([])
-        setSelectedDeptId('')
-      } else {
-        toast.error('That school could not be found. Please pick one from the list.')
+      if (!data.school) {
+        toast.error('That school could not be found.')
+        return false
       }
+      setDepartments(data.departments ?? [])
+      setSelectedSchoolId(data.school.id)
+      setSchoolInfo({
+        termSystem: data.school.termSystem ?? 'SEMESTER',
+        currentSemester: data.school.currentSemester ?? 1,
+      })
+      setSelectedCourseIds([])
+      setSelectedDeptId('')
+      // A ?school= link must always land in school mode — even when the public
+      // schools listing omitted this school (e.g. institution not ACTIVE) —
+      // so make sure the linked school exists in the picker.
+      setSchools((prev) =>
+        prev.some((s) => s.id === data.school.id)
+          ? prev
+          : [
+              ...prev,
+              {
+                id: data.school.id,
+                name: data.school.name,
+                code: data.school.code,
+                institutionName: data.school.institutionName ?? '',
+                termSystem: data.school.termSystem ?? 'SEMESTER',
+                currentSemester: data.school.currentSemester ?? 1,
+                departmentCount: 0,
+              },
+            ],
+      )
+      return true
     } catch {
       toast.error('Failed to load school courses')
+      return false
     } finally {
       setLoadingSchool(false)
     }
@@ -287,6 +319,24 @@ export default function StudentEnrollPage() {
         const urlParams = new URLSearchParams(window.location.search)
         const courseParam = urlParams.get('course') || urlParams.get('courseId') || urlParams.get('courseCode')
         const deptParam = urlParams.get('dept') || urlParams.get('deptId')
+
+        // Scoped invite parameters (level/semester) — valid for every link
+        // shape: ?school=, ?dept= and ?course=. A scoped level locks the
+        // level picker; a scoped semester overrides the institution's term.
+        const levelParam = Number(urlParams.get('level') ?? '')
+        const semesterParam = Number(urlParams.get('semester') ?? urlParams.get('term') ?? '')
+        const validLevel = [100, 200, 300, 400, 500, 600, 700, 800].includes(levelParam)
+          ? levelParam
+          : null
+        const validSemester =
+          Number.isInteger(semesterParam) && semesterParam >= 1 && semesterParam <= 4
+            ? semesterParam
+            : null
+        if (validLevel) {
+          setLevel(validLevel)
+          setLinkLevel(validLevel)
+        }
+        if (validSemester) setLinkSemester(validSemester)
 
         if (courseParam || deptParam) {
           // Legacy deep links keep their original behavior exactly.
@@ -330,17 +380,18 @@ export default function StudentEnrollPage() {
 
         const schoolParam = urlParams.get('school')
         if (schoolParam) {
-          const match = list.find(
-            (s) => s.id === schoolParam || s.code.toLowerCase() === schoolParam.toLowerCase()
-          )
-          if (match) {
-            setSelectedSchoolId(match.id)
-            await loadSchoolCatalog(match.id)
-          } else if (list.length > 0) {
-            await loadSchoolCatalog(schoolParam)
-          } else {
-            await loadLegacyDepartments()
+          // A school invitation link must ALWAYS land in the school flow with
+          // that school preselected — the catalog endpoint resolves by id or
+          // code even when the ACTIVE-only schools listing omitted it (e.g.
+          // institution not yet ACTIVE), which used to dump students on the
+          // generic department picker instead.
+          const resolved = await loadSchoolCatalog(schoolParam)
+          if (resolved) {
+            setLinkSchool(true)
+            return
           }
+          // School truly missing — degrade to the legacy picker.
+          await loadLegacyDepartments()
         } else if (list.length === 0) {
           // No schools configured — fall back to the legacy all-departments picker.
           await loadLegacyDepartments()
@@ -357,10 +408,17 @@ export default function StudentEnrollPage() {
 
   // When enrolling through a course link, only courses at the SAME level as
   // the wrapped course are offered — students join their own cohort only.
+  // Scoped invitation links narrow the list further to the invited level/term.
   const availableCourses = currentDept
     ? targetCourse
-      ? currentDept.courses.filter((c) => c.level === targetCourse.level)
-      : currentDept.courses
+      ? currentDept.courses.filter(
+          (c) => c.level === targetCourse.level && (linkSemester == null || c.semester === linkSemester)
+        )
+      : currentDept.courses.filter(
+          (c) =>
+            (linkLevel == null || c.level === linkLevel) &&
+            (linkSemester == null || c.semester === linkSemester)
+        )
     : []
 
   const selectedCourses = availableCourses.filter((c) => selectedCourseIds.includes(c.id))
@@ -372,7 +430,8 @@ export default function StudentEnrollPage() {
   // school's courses filtered by their level and the current term, grouped
   // by department across the whole school.
   const schoolMode = !isLegacyLink && schools.length > 0
-  const currentSemester = schoolInfo?.currentSemester ?? 1
+  // A scoped invitation link overrides the institution's current term.
+  const currentSemester = linkSemester ?? schoolInfo?.currentSemester ?? 1
   const termLabel =
     schoolInfo?.termSystem === 'TRIMESTER'
       ? 'Trimester'
@@ -1038,8 +1097,10 @@ export default function StudentEnrollPage() {
                       </label>
                       <select
                         value={selectedSchoolId}
+                        disabled={linkSchool}
+                        title={linkSchool ? 'School/Faculty is set by your invitation link' : undefined}
                         onChange={(e) => handleSchoolChange(e.target.value)}
-                        className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="w-full h-11 px-3 rounded-xl border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-80"
                       >
                         <option value="">Select your School / Faculty…</option>
                         {schools.map((s) => (
@@ -1048,11 +1109,30 @@ export default function StudentEnrollPage() {
                           </option>
                         ))}
                       </select>
-                      {selectedSchoolId && schoolInfo && (
+                      {linkSchool && selectedSchoolId && (
+                        <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Locked to{' '}
+                            <strong>{schools.find((s) => s.id === selectedSchoolId)?.name}</strong>{' '}
+                            by your invitation link.
+                          </span>
+                        </p>
+                      )}
+                      {selectedSchoolId && schoolInfo && (linkLevel != null || linkSemester != null) ? (
+                        <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            This invitation is scoped to {linkLevel != null ? `Level ${linkLevel}` : 'all levels'}
+                            {linkSemester != null ? ` · ${termLabel} ${linkSemester}` : ` · ${termLabel} ${currentSemester}`}
+                            {' '}— only matching courses are listed.
+                          </span>
+                        </p>
+                      ) : selectedSchoolId && schoolInfo ? (
                         <p className="text-[11px] text-muted-foreground">
                           Showing {termLabel.toLowerCase()} {currentSemester} courses — set your level below to narrow the list. Your student record will be homed to this school.
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   ) : (
                     /* Department selection (legacy flow) */
@@ -1103,23 +1183,32 @@ export default function StudentEnrollPage() {
                         Level
                       </label>
                       {schoolMode ? (
-                        <select
-                          value={level}
-                          onChange={(e) => setLevel(Number(e.target.value))}
-                          className="w-full h-11 px-3 rounded-xl border bg-card text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
-                            <option key={l} value={l}>
-                              Level {l}
-                            </option>
-                          ))}
-                        </select>
+                        <>
+                          <select
+                            value={level}
+                            disabled={linkLevel != null}
+                            onChange={(e) => setLevel(Number(e.target.value))}
+                            className="w-full h-11 px-3 rounded-xl border bg-card text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-80"
+                            title={linkLevel != null ? 'Level is set by your invitation link' : undefined}
+                          >
+                            {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                              <option key={l} value={l}>
+                                Level {l}
+                              </option>
+                            ))}
+                          </select>
+                          {linkLevel != null && (
+                            <p className="text-[11px] text-muted-foreground">
+                              Locked to Level {linkLevel} by your invitation link.
+                            </p>
+                          )}
+                        </>
                       ) : (
                         <div
                           className="w-full h-11 px-3 rounded-xl border bg-muted/50 flex items-center text-sm font-semibold text-foreground"
                           title="Level is set automatically from your course"
                         >
-                          Level {effectiveLevel}
+                          Level {linkLevel ?? effectiveLevel}
                         </div>
                       )}
                     </div>
@@ -1261,6 +1350,16 @@ export default function StudentEnrollPage() {
                       )
                     ) : (
                       <>
+                        {(linkLevel != null || linkSemester != null) && (
+                          <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              This invitation is scoped to {linkLevel != null ? `Level ${linkLevel}` : 'all levels'}
+                              {linkSemester != null ? ` · Term ${linkSemester}` : ''}
+                              {' '}— only matching courses are listed.
+                            </span>
+                          </p>
+                        )}
                         {availableCourses.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic py-3">
                             No courses registered in this department yet. You can proceed and the department head will assign courses later.

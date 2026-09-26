@@ -16,6 +16,26 @@ import {
 import { Button } from '@/components/ui/button'
 import type { EnrollmentSubmission } from '@/lib/types'
 
+// ---------- Access-code role labels ----------
+
+/**
+ * Human label for an access-code role — code cards, invite confirmations and
+ * login CTAs all surface the invitation's actual position (Dean / HoD /
+ * Lecturer) instead of a hardcoded lecturer wording.
+ */
+export function accessCodeRoleLabel(role: string | null | undefined): string {
+  switch (role) {
+    case 'ADMIN':
+      return 'Dept Admin / HoD'
+    case 'DEAN':
+      return 'Dean'
+    case 'SUPERADMIN':
+      return 'Administrator'
+    default:
+      return 'Lecturer'
+  }
+}
+
 // ---------- Page header ----------
 
 export function PageHeader({

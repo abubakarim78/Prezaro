@@ -482,3 +482,30 @@ Verify: bun run db:push OK; bunx tsc --noEmit clean; bun run lint clean (eslint 
 Stage Summary:
 - Enrollment approval is now slice-based: each HoD independently accepts/declines their department's courses; the Dean retains final say and instantly clears all queues on approve; students, enrollments and email notifications follow the slices.
 - Settings no longer surfaces the email outbox (API surface unchanged).
+---
+Task ID: 30
+Agent: Qoder
+Task: Replace the eye emoji in branded emails with the real Prezaro emblem, and add level + term-scoped student-enrollment invitation links for Deans, HoDs and the platform admin.
+
+Work Log:
+- public/emblem-email.png: new 72x72 PNG generated from emblem-white.png (System.Drawing, high-quality bicubic, 4.7KB). src/lib/email-logo.ts: generated module embedding that PNG as base64 (EMBLEM_LOGO_BASE64) plus EMBLEM_LOGO_CID constant ("prezaro-emblem") so email.ts needs no filesystem access at runtime.
+- src/lib/email.ts: layout() header now renders a white rounded tile (nested tables) with <img src="cid:prezaro-emblem"> (24px) beside the white "Prezaro" wordmark instead of the eye-emoji HTML entity. sendAppEmail() attaches the emblem inline on both providers: Resend raw API attachments [{filename, content(base64), content_id}] and nodemailer attachments [{filename, content, encoding:base64, cid, contentDisposition:inline}]. CID inline images render across Gmail / Apple Mail / Outlook; SIMULATED outbox rows just store the cid: reference (no /api/emails consumer remains after the Task 29 settings removal).
+- /api/departments/public: legacy dept payload now includes course.semester so ?dept= links can term-filter client-side.
+- src/app/enroll/page.tsx: link params ?level= (100..800) and ?semester= (1..4, alias ?term=) parsed on mount for ALL link shapes (?school=, ?dept=, ?course=). A scoped level preselects and LOCKS the level picker (school mode: "Locked to Level N by your invitation link"; legacy mode read-only box shows it); a scoped semester overrides the institution currentSemester for that visit. availableCourses: targetCourse branch also honors the semester filter; dept branch filters by linkLevel/linkSemester. Sparkles scoped-invite hints added to both flows. Unscoped links behave exactly as before.
+- school.tsx (Dean): "School Enrollment Link" card gains Level ("Any level" + 100..800) and Term ("Current (default)" + term count by termSystem: SEMESTER 2 / TRIMESTER 3 / QUARTER 4) selects; getSchoolEnrollUrl() builds ?school=&level=&semester=; term labels fetched from /api/departments/public?list=schools (falls back to Semester/1); scoped state shows a Sparkles hint and the copy toast label distinguishes scoped links.
+- admin.tsx (HoD): share-link dialog gains Level + Term selects - level applies to the department-wide link only (course links already follow their course level, so the Level select disables), term applies to both; getPublicEnrollUrl() appends ?level=&semester=; scoped hint line; "Student Experience" copy updated (also aligned with the Task 29 slice-review flow).
+- platform-admin.tsx: manage-school sheet "School enrollment link" gains the same Level/Term selects driven by manageSchool.termSystem; schoolEnrollUrl() builder replaces the hardcoded Input value.
+
+Verify: bunx tsc --noEmit clean; eslint over the 7 touched files exit 0.
+
+Stage Summary:
+- Every branded email now carries the real Prezaro emblem as an embedded CID image instead of a fallback emoji.
+- Enrollment invitations can be wrapped to a level + trimester/semester; students opening a scoped link land with level/term preselected and locked and see only that cohort courses. All three surfaces (Dean card, HoD dialog, superadmin school sheet) share one URL contract: /enroll?school=&level=&semester=.
+
+## Task ID: 31 - Accept wording, school-link landing fix, role-aware access-code labels
+
+- Enrollment review buttons shortened to just "Accept" in both queues (HoD admin.tsx, Dean school.tsx - was "Accept into <dept>" / "Approve & Enroll").
+- Fixed: Dean/School enrollment links (?school=...) landed on the legacy department picker when the ACTIVE-only schools listing was empty or omitted the school. The mount effect now always resolves the link through the school catalog endpoint (matches id or code regardless of the listing) and only degrades to the legacy picker when the school truly does not exist.
+- Linked School/Faculty is now preselected AND locked (new linkSchool state, disabled select + Sparkles "Locked to <school> by your invitation link" hint); failure toast made position-neutral.
+- Access-code labels now name the invitation's actual position everywhere: shared accessCodeRoleLabel() helper in shared.tsx (Dean / Dept Admin-HoD / Lecturer / Administrator) used by admin.tsx + school.tsx code cards and invite confirmations; login CTA is role-aware ("Activate Dean Access" etc. from the inspect role, neutral "Activate Access" before verification) plus role badge on the verified card; invite email roleLabel handles DEAN ("Dean / Faculty Administrator"). admin.tsx "Lecturer Access" tab/dialog kept (HoDs generate lecturer-only codes there).
+- Verify: bunx tsc --noEmit -> 0; bunx eslint over enroll page, school, admin, login, shared, email -> 0.
