@@ -11,6 +11,10 @@ tool-results
 agent-ctx
 upload
 download
+scripts
+.qoder
+.zscripts
+prisma/seed.ts
 *.log
 .env
 .env.*

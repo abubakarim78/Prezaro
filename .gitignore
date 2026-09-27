@@ -58,14 +58,18 @@ db/.auth-secret
 db/.rollmark-instance
 db/.prezaro-instance
 
-# uploads, downloads & tool results
-upload/*
-!upload/.gitkeep
-download/*
-!download/.gitkeep
+# uploads, downloads & tool results (harness artifacts — never publish)
+upload/
+download/
 tool-results/
-scripts/
 
-# Skills directory & local dev artifacts
+# seed & maintenance scripts (local only — do not push)
+scripts/
+prisma/seed.ts
+
+# local tooling & agent artifacts (never publish)
 /skills/
-.zscripts/*.pid
+/tests/
+.zscripts/
+.qoder/
+worklog.md
