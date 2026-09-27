@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { BadRequestError, ConflictError, NotFoundError, handle, readJson, userDTO, zodMessage } from '../../_lib/helpers'
+import { notifyUsers } from '../../_lib/notify'
 import { setAuthCookie, signToken } from '@/lib/auth'
 
 const inspectSchema = z.object({
@@ -160,6 +161,40 @@ export async function POST(req: Request) {
           status: newUsedCount >= accessCode.maxUses ? 'EXHAUSTED' : 'ACTIVE',
         },
       })
+
+      // In-app: the code creator hears about the join (notifyUsers is
+      // swallow-safe). When an HoD joins, the school's Dean is looped in.
+      const joinedLabel = `${finalUser.name} (${finalUser.email})`
+      const roleLabel =
+        accessCode.role === 'ADMIN' ? 'Head of Department' : accessCode.role === 'DEAN' ? 'Dean' : 'Lecturer'
+      const creator = await db.user.findUnique({
+        where: { id: accessCode.createdById },
+        select: { id: true, role: true },
+      })
+      const creatorView =
+        creator?.role === 'DEAN' ? 'school' : creator?.role === 'SUPERADMIN' ? 'platform' : 'admin'
+      await notifyUsers([accessCode.createdById], {
+        type: 'STAFF_JOINED',
+        title: 'New staff joined via your code',
+        body: `${joinedLabel} joined as ${roleLabel}`,
+        view: creatorView,
+      })
+      if (accessCode.role === 'ADMIN') {
+        const schoolId =
+          accessCode.schoolId ??
+          accessCode.department?.schoolId ??
+          finalUser.department?.schoolId ??
+          null
+        if (schoolId) {
+          const dean = await db.user.findFirst({ where: { role: 'DEAN', schoolId }, select: { id: true } })
+          await notifyUsers([dean?.id], {
+            type: 'STAFF_JOINED',
+            title: 'New Head of Department',
+            body: `${joinedLabel} joined as Head of Department via access code`,
+            view: 'school',
+          })
+        }
+      }
 
       const token = await signToken({ sub: finalUser.id })
       const res = NextResponse.json({ user: userDTO(finalUser), token }, { status: 201 })

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { classReminderHtml, sendAppEmail } from '@/lib/email'
+import { notifyUsers } from '../../_lib/notify'
 
 export async function GET(req: Request) {
   return executeReminders(req)
@@ -84,6 +85,15 @@ async function executeReminders(req: Request) {
           courseCode: s.course.code,
           lecturerId: s.lecturerId,
         },
+      })
+
+      // In-app reminder alongside the email (notifyUsers is swallow-safe).
+      await notifyUsers([s.lecturerId], {
+        type: 'CLASS_REMINDER',
+        title: `Class soon: ${s.course.code}`,
+        body: `${s.course.title} starts at ${s.startTime}${s.venue ? ` in ${s.venue}` : ''}`,
+        view: 'schedule',
+        params: { scheduleId: s.id },
       })
 
       await db.classSchedule.update({

@@ -13,7 +13,6 @@ import {
   Clock,
   Download,
   Globe2,
-  GraduationCap,
   Mail,
   MapPin,
   Play,
@@ -149,18 +148,6 @@ export default function HomeView() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const todayLabel = format(new Date(), 'EEEE, d MMMM')
 
-  // Last managed department (remembered by the platform manage drawer) so
-  // super admin quick links land in the right department context.
-  const [lastDept] = useState<{ id: string; name: string } | null>(() => {
-    if (typeof window === 'undefined') return null
-    try {
-      const raw = localStorage.getItem('prezaro.platformDept.v1')
-      return raw ? (JSON.parse(raw) as { id: string; name: string }) : null
-    } catch {
-      return null
-    }
-  })
-
   // ---------- Super admin home: platform management only ----------
   // No attendance surfaces — quick links into the Platform Control Center.
   if (isSuperAdmin) {
@@ -213,11 +200,6 @@ export default function HomeView() {
                 onClick={() => navigate('platform', { tab: 'institutions' })}
               />
               <QuickAction
-                icon={GraduationCap}
-                label="Departments"
-                onClick={() => navigate('platform', { tab: 'departments' })}
-              />
-              <QuickAction
                 icon={Users}
                 label="Users"
                 onClick={() => navigate('platform', { tab: 'users' })}
@@ -233,30 +215,6 @@ export default function HomeView() {
                 onClick={() => navigate('platform', { tab: 'institutions', provision: '1' })}
               />
             </div>
-
-            {/* ---------- Continue managing remembered department ---------- */}
-            {lastDept && (
-              <motion.button
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: 0.05 }}
-                onClick={() => navigate('platform', { tab: 'departments', manage: lastDept.id })}
-                className="flex w-full items-center gap-3 rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/50"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <GraduationCap className="h-5 w-5" />
-                </div>
-                <span className="min-w-0 flex-1 leading-tight">
-                  <span className="block truncate text-sm font-semibold">
-                    Continue managing {lastDept.name}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Courses, students, HoD invites, and submissions.
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </motion.button>
-            )}
 
             {/* ---------- Install banner ---------- */}
             {!installDismissed && (

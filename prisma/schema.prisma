@@ -93,6 +93,7 @@ model User {
   approvalReviews EnrollmentApproval[] @relation("EnrollmentApprovalReviewer")
   codeClaimedId String?
   codeClaimed   AccessCode?  @relation("CodesClaimed", fields: [codeClaimedId], references: [id], onDelete: SetNull)
+  notifications Notification[]
   createdAt     DateTime     @default(now())
 }
 
@@ -285,4 +286,22 @@ model ClassSchedule {
   updatedAt           DateTime @updatedAt
 
   @@index([lecturerId, dayOfWeek])
+}
+
+// In-app notification feed. One row per recipient — created by the API
+// layer whenever an activity concerns a staff user (enrollment requests,
+// approval outcomes, staff joins, role changes, class reminders, …).
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String    // ENROLLMENT_SUBMITTED | ENROLLMENT_DECIDED | SLICE_DECIDED | STAFF_JOINED | ROLE_UPDATED | STUDENT_ENROLLED | CLASS_REMINDER | POLICY_UPDATED
+  title      String
+  body       String
+  view       String?   // ViewName to open when tapped (client-side view router)
+  paramsJson String    @default("{}") // JSON object of view params for deep linking
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
 }

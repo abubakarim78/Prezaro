@@ -28,6 +28,12 @@ export async function GET(req: Request) {
         institution: {
           select: { id: true, name: true, code: true, termSystem: true, currentSemester: true },
         },
+        users: {
+          where: { role: 'DEAN' },
+          select: { id: true, name: true, email: true },
+          take: 1,
+          orderBy: { createdAt: 'asc' },
+        },
         _count: { select: { departments: true } },
       },
     })
@@ -56,6 +62,9 @@ export async function GET(req: Request) {
       currentSemester: s.institution?.currentSemester ?? 1,
       departmentCount: s._count.departments,
       pendingCount: pendingBySchool.get(s.id) ?? 0,
+      deanUserId: s.users[0]?.id ?? null,
+      deanName: s.users[0]?.name ?? null,
+      deanEmail: s.users[0]?.email ?? null,
       createdAt: s.createdAt.toISOString(),
     }))
 
@@ -107,8 +116,13 @@ export async function POST(req: Request) {
           institutionId: school.institutionId,
           institutionName: school.institution?.name ?? null,
           institutionCode: school.institution?.code ?? null,
+          termSystem: 'SEMESTER',
+          currentSemester: 1,
           departmentCount: 0,
           pendingCount: 0,
+          deanUserId: null,
+          deanName: null,
+          deanEmail: null,
           createdAt: school.createdAt.toISOString(),
         } satisfies School,
       },

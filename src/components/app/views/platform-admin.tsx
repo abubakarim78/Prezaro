@@ -4,14 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import {
-  BookOpen,
   Building2,
-  CheckCircle2,
+  Check,
   ChevronRight,
   Copy,
-  Database,
   ExternalLink,
-  Filter,
   Globe2,
   GraduationCap,
   KeyRound,
@@ -32,7 +29,6 @@ import {
   ToggleLeft,
   ToggleRight,
   Trash2,
-  UserCheck,
   UserCog,
   UserPlus,
   Users,
@@ -42,7 +38,6 @@ import {
 import type {
   AccessCode,
   Department,
-  EnrollmentSubmission,
   Institution,
   InstitutionInput,
   PlatformInstitutionsResponse,
@@ -52,6 +47,7 @@ import type {
   School,
   User,
 } from '@/lib/types'
+import { termSystemMeta } from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -150,17 +146,6 @@ export default function PlatformAdminView() {
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL')
   const [userInstFilter, setUserInstFilter] = useState<string>('ALL')
 
-  // Department management state
-  const [addDeptOpen, setAddDeptOpen] = useState(false)
-  const [deptSearch, setDeptSearch] = useState('')
-  const [deptInstFilter, setDeptInstFilter] = useState<string>('ALL')
-  const [newDeptData, setNewDeptData] = useState({
-    name: '',
-    code: '',
-    institutionId: '',
-    schoolId: '',
-  })
-
   // Schools layer (Institution → School → Department)
   const [schools, setSchools] = useState<School[]>([])
   const [addSchoolOpen, setAddSchoolOpen] = useState(false)
@@ -184,15 +169,12 @@ export default function PlatformAdminView() {
     const qs = params.toString()
     return `${window.location.origin}/enroll?${qs}`
   }
-  const schoolTermLabel =
-    manageSchool?.termSystem === 'TRIMESTER'
-      ? 'Trimester'
-      : manageSchool?.termSystem === 'QUARTER'
-        ? 'Quarter'
-        : 'Semester'
-  const schoolTermCount =
-    manageSchool?.termSystem === 'TRIMESTER' ? 3 : manageSchool?.termSystem === 'QUARTER' ? 4 : 2
+  // Term labels/count follow the school's institution mode (Semester 2 / Trimester 3).
+  const schoolTermMeta = termSystemMeta(manageSchool?.termSystem)
   const [deanResult, setDeanResult] = useState<{ code: string; emailed: boolean } | null>(null)
+  // Assigned-institution editing inside the Manage School sheet (PATCH backfills departments).
+  const [schoolInstitutionId, setSchoolInstitutionId] = useState('')
+  const [savingSchoolInstitution, setSavingSchoolInstitution] = useState(false)
 
   // Institutions Filters & search
   const [search, setSearch] = useState('')
@@ -208,39 +190,19 @@ export default function PlatformAdminView() {
 
   // Deep-link support: home quick links open a specific tab…
   const [activeTab, setActiveTab] = useState(() =>
-    params.tab === 'departments' ||
-    params.tab === 'schools' ||
-    params.tab === 'users' ||
-    params.tab === 'policies'
+    params.tab === 'schools' || params.tab === 'users' || params.tab === 'policies'
       ? params.tab
       : 'institutions'
   )
 
-  // ---------- Department manage drawer (platform dept tooling) ----------
-  const [manageDept, setManageDept] = useState<Department | null>(null)
-  const [managedStaff, setManagedStaff] = useState<
-    { id: string; name: string; title: string | null; role: string }[]
-  >([])
-  const [inviteName, setInviteName] = useState('')
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviting, setInviting] = useState(false)
-  const [inviteResult, setInviteResult] = useState<{ code: string; emailed: boolean } | null>(null)
-  const [courseCode, setCourseCode] = useState('')
-  const [courseTitle, setCourseTitle] = useState('')
-  const [courseLevel, setCourseLevel] = useState('200')
-  const [courseTerm, setCourseTerm] = useState('S1')
-  const [courseLecturerId, setCourseLecturerId] = useState('')
-  const [creatingCourse, setCreatingCourse] = useState(false)
-  const [bulkCsv, setBulkCsv] = useState('')
-  const [bulkUploading, setBulkUploading] = useState(false)
-  const [studentId, setStudentId] = useState('')
-  const [studentFirst, setStudentFirst] = useState('')
-  const [studentLast, setStudentLast] = useState('')
-  const [studentLevel, setStudentLevel] = useState('100')
-  const [enrollingStudent, setEnrollingStudent] = useState(false)
-  const [managedSubs, setManagedSubs] = useState<EnrollmentSubmission[] | null>(null)
-  const [loadingManagedSubs, setLoadingManagedSubs] = useState(false)
-  const [reviewingSubId, setReviewingSubId] = useState<string | null>(null)
+  // ---------- Create-department dialog (opened from the Manage School sheet) ----------
+  const [addDeptOpen, setAddDeptOpen] = useState(false)
+  const [newDeptData, setNewDeptData] = useState({
+    name: '',
+    code: '',
+    institutionId: '',
+    schoolId: '',
+  })
 
   // User modals state
   const [addUserOpen, setAddUserOpen] = useState(false)
@@ -253,6 +215,7 @@ export default function PlatformAdminView() {
     password: '',
     institutionId: '',
     departmentId: '',
+    schoolId: '',
   })
   const [editUserData, setEditUserData] = useState({
     name: '',
@@ -261,6 +224,7 @@ export default function PlatformAdminView() {
     password: '',
     institutionId: '',
     departmentId: '',
+    schoolId: '',
   })
 
   // Provisioning form state
@@ -357,20 +321,6 @@ export default function PlatformAdminView() {
     })
   }, [platformUsers, userSearch, userRoleFilter, userInstFilter])
 
-  // Filtered departments
-  const filteredDepartments = useMemo(() => {
-    return departments.filter((d) => {
-      const matchInst = deptInstFilter === 'ALL' || d.institutionId === deptInstFilter
-      const q = deptSearch.trim().toLowerCase()
-      const matchQ =
-        !q ||
-        d.name.toLowerCase().includes(q) ||
-        d.code.toLowerCase().includes(q) ||
-        (d.institutionName && d.institutionName.toLowerCase().includes(q))
-      return matchInst && matchQ
-    })
-  }, [departments, deptSearch, deptInstFilter])
-
   // Department actions
   const handleCreateDepartment = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -397,19 +347,6 @@ export default function PlatformAdminView() {
       toast.error(getErrorMessage(e))
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleDeleteDepartment = async (dept: Department) => {
-    if (!confirm(`Are you sure you want to delete department "${dept.name}" (${dept.code})? Any courses and student rosters linked to it will also be removed.`)) {
-      return
-    }
-    try {
-      await api(`/api/departments?id=${dept.id}`, { method: 'DELETE' })
-      toast.success(`Department "${dept.name}" deleted`)
-      loadData(true)
-    } catch (e) {
-      toast.error(getErrorMessage(e))
     }
   }
 
@@ -446,6 +383,7 @@ export default function PlatformAdminView() {
     setDeanResult(null)
     setDeanName('')
     setDeanEmail('')
+    setSchoolInstitutionId(s.institutionId ?? '')
   }
 
   // Open the department-create dialog preconfigured for this school.
@@ -480,231 +418,32 @@ export default function PlatformAdminView() {
     }
   }
 
-  // ---------- Manage drawer actions ----------
-  const openManageDrawer = (d: Department) => {
-    setManageDept(d)
-    setInviteResult(null)
-    setInviteName('')
-    setInviteEmail('')
-    setCourseCode('')
-    setCourseTitle('')
-    setCourseLevel('200')
-    setCourseTerm('S1')
-    setCourseLecturerId('')
-    setBulkCsv('')
-    setStudentId('')
-    setStudentFirst('')
-    setStudentLast('')
-    setStudentLevel('100')
-    setManagedSubs(null)
-    // Remember the department context so home quick links land here.
+  // Assign the school's institution via PATCH — the server backfills the
+  // school's departments (and transitively their users' institution).
+  const handleAssignSchoolInstitution = async () => {
+    if (!manageSchool) return
+    setSavingSchoolInstitution(true)
     try {
-      localStorage.setItem('prezaro.platformDept.v1', JSON.stringify({ id: d.id, name: d.name }))
-    } catch {
-      // ignore
-    }
-  }
-
-  // Staff of the managed department — powers the course lecturer select.
-  useEffect(() => {
-    if (!manageDept) return
-    let cancelled = false
-    setManagedStaff([])
-    setCourseLecturerId('')
-    api<{ staff: { id: string; name: string; title: string | null; role: string }[] }>(
-      `/api/departments/staff?departmentId=${manageDept.id}`
-    )
-      .then((d) => {
-        if (!cancelled) setManagedStaff(d.staff)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [manageDept])
-
-  const handleInviteHod = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!manageDept) return
-    setInviting(true)
-    try {
-      const res = await api<{ code: AccessCode }>('/api/departments/codes', {
-        method: 'POST',
-        body: {
-          role: 'ADMIN',
-          departmentId: manageDept.id,
-          designatedName: inviteName.trim() || undefined,
-          designatedEmail: inviteEmail.trim() || undefined,
-          sendEmailImmediately: Boolean(inviteEmail.trim()),
-          maxUses: 1,
-          expiresInDays: 7,
-        },
-      })
-      setInviteResult({ code: res.code.code, emailed: Boolean(inviteEmail.trim()) })
-      toast.success(`HoD invite code created for ${manageDept.name}`)
-    } catch (err) {
-      toast.error(getErrorMessage(err))
-    } finally {
-      setInviting(false)
-    }
-  }
-
-  const handleCreateManagedCourse = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!manageDept || !courseCode.trim() || !courseTitle.trim()) {
-      toast.error('Course code and title are required')
-      return
-    }
-    setCreatingCourse(true)
-    try {
-      await api('/api/courses', {
-        method: 'POST',
-        body: {
-          code: courseCode.trim().toUpperCase(),
-          title: courseTitle.trim(),
-          level: Number(courseLevel) || 200,
-          semester: Number(courseTerm.slice(1)) || 1,
-          termSystem: courseTerm.startsWith('T') ? 'TRIMESTER' : 'SEMESTER',
-          departmentId: manageDept.id,
-          ...(courseLecturerId ? { lecturerId: courseLecturerId } : {}),
-        },
-      })
-      toast.success(`Course ${courseCode.trim().toUpperCase()} created in ${manageDept.name}`)
-      setCourseCode('')
-      setCourseTitle('')
-      loadData(true)
-    } catch (err) {
-      toast.error(getErrorMessage(err))
-    } finally {
-      setCreatingCourse(false)
-    }
-  }
-
-  const handleBulkUploadCourses = async () => {
-    if (!manageDept) return
-    const lines = bulkCsv
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-    if (lines.length === 0) {
-      toast.error('Paste one course per line: CODE,Title,Level,Semester')
-      return
-    }
-    setBulkUploading(true)
-    let created = 0
-    let failed = 0
-    try {
-      for (const line of lines) {
-        const [code, title, level, semester, termSystem] = line.split(',').map((p) => p.trim())
-        if (!code || !title) {
-          failed += 1
-          continue
+      const res = await api<{ school: School; departmentsBackfilled: number }>(
+        `/api/platform/schools/${manageSchool.id}`,
+        {
+          method: 'PATCH',
+          body: { institutionId: schoolInstitutionId || null },
         }
-        try {
-          await api('/api/courses', {
-            method: 'POST',
-            body: {
-              code: code.toUpperCase(),
-              title,
-              level: Number(level) || 200,
-              semester: Number(semester) || 1,
-              termSystem: (termSystem || '').toUpperCase() === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
-              departmentId: manageDept.id,
-            },
-          })
-          created += 1
-        } catch {
-          failed += 1
-        }
-      }
-      if (created > 0) {
-        toast.success(`Uploaded ${created} course${created === 1 ? '' : 's'} to ${manageDept.name}`)
-        setBulkCsv('')
-        loadData(true)
-      }
-      if (failed > 0) toast.error(`${failed} line${failed === 1 ? '' : 's'} failed (duplicates or invalid format)`)
-    } finally {
-      setBulkUploading(false)
-    }
-  }
-
-  const handleEnrollManagedStudent = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!manageDept) return
-    if (!studentId.trim() || !studentFirst.trim() || !studentLast.trim()) {
-      toast.error('Student ID, first name, and last name are required')
-      return
-    }
-    setEnrollingStudent(true)
-    try {
-      await api('/api/students', {
-        method: 'POST',
-        body: {
-          single: {
-            studentId: studentId.trim(),
-            firstName: studentFirst.trim(),
-            lastName: studentLast.trim(),
-            level: Number(studentLevel) || 100,
-          },
-          departmentId: manageDept.id,
-        },
-      })
-      toast.success(`${studentFirst.trim()} ${studentLast.trim()} enrolled in ${manageDept.name}`)
-      setStudentId('')
-      setStudentFirst('')
-      setStudentLast('')
-      loadData(true)
-    } catch (err) {
-      toast.error(getErrorMessage(err))
-    } finally {
-      setEnrollingStudent(false)
-    }
-  }
-
-  const loadManagedSubs = async () => {
-    if (!manageDept) return
-    setLoadingManagedSubs(true)
-    try {
-      const res = await api<{ submissions: EnrollmentSubmission[] }>(
-        `/api/departments/enrollment-submissions?departmentId=${manageDept.id}&status=PENDING`
       )
-      setManagedSubs(res.submissions)
-    } catch (err) {
-      toast.error(getErrorMessage(err))
-    } finally {
-      setLoadingManagedSubs(false)
-    }
-  }
-
-  const handleReviewManagedSub = async (submissionId: string, action: 'APPROVE' | 'REJECT') => {
-    setReviewingSubId(submissionId)
-    try {
-      await api('/api/departments/enrollment-submissions', {
-        method: 'PATCH',
-        body: { submissionId, action },
-      })
-      toast.success(action === 'APPROVE' ? 'Student verified and enrolled!' : 'Submission rejected')
-      setManagedSubs((prev) => (prev ?? []).filter((s) => s.id !== submissionId))
+      setManageSchool(res.school)
+      toast.success(
+        res.departmentsBackfilled > 0
+          ? `Institution assigned — ${res.departmentsBackfilled} department${res.departmentsBackfilled === 1 ? '' : 's'} linked`
+          : 'School institution updated'
+      )
       loadData(true)
-    } catch (err) {
-      toast.error(getErrorMessage(err))
+    } catch (e) {
+      toast.error(getErrorMessage(e))
     } finally {
-      setReviewingSubId(null)
+      setSavingSchoolInstitution(false)
     }
   }
-
-  // Home "continue managing" deep link: open the departments tab and drawer.
-  const manageParamSeen = useRef<string | null>(null)
-  useEffect(() => {
-    if (!params.manage || loading) return
-    if (manageParamSeen.current === params.manage) return
-    const target = departments.find((d) => d.id === params.manage)
-    if (target) {
-      manageParamSeen.current = params.manage
-      setActiveTab('departments')
-      openManageDrawer(target)
-    }
-  }, [params.manage, loading, departments])
 
   // Auto-generate slug from name
   const handleNameChange = (val: string) => {
@@ -846,7 +585,8 @@ export default function PlatformAdminView() {
         role: 'LECTURER',
         password: '',
         institutionId: institutions[0]?.id ?? '',
-        departmentId: departments[0]?.id ?? '',
+        departmentId: '',
+        schoolId: '',
       })
       loadData(true)
     } catch (e) {
@@ -866,6 +606,7 @@ export default function PlatformAdminView() {
       password: '',
       institutionId: u.institutionId ?? '',
       departmentId: u.departmentId ?? '',
+      schoolId: u.schoolId ?? '',
     })
   }
 
@@ -880,6 +621,7 @@ export default function PlatformAdminView() {
         role: editUserData.role,
         institutionId: editUserData.institutionId || null,
         departmentId: editUserData.departmentId || null,
+        schoolId: editUserData.schoolId || null,
       }
       if (editUserData.password.trim()) {
         payload.password = editUserData.password.trim()
@@ -992,7 +734,7 @@ export default function PlatformAdminView() {
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-5 sm:max-w-3xl bg-muted/60 p-1 rounded-xl">
+          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
             <TabsTrigger
               value="institutions"
               className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
@@ -1008,14 +750,6 @@ export default function PlatformAdminView() {
               <Layers className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">Schools</span>
               <span className="shrink-0 tabular-nums opacity-80">({schools.length})</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="departments"
-              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
-            >
-              <GraduationCap className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 truncate">Departments</span>
-              <span className="shrink-0 tabular-nums opacity-80">({departments.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="users"
@@ -1160,7 +894,7 @@ export default function PlatformAdminView() {
                         <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
                           <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
                             <GraduationCap className="h-3 w-3 text-primary" />
-                            {inst.termSystem === 'TRIMESTER' ? 'Trimester System' : 'Semester System'}
+                            {termSystemMeta(inst.termSystem).label} System
                           </span>
                           <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
                             <Shield className="h-3 w-3 text-emerald-600" />
@@ -1243,6 +977,7 @@ export default function PlatformAdminView() {
                       <tr>
                         <th className="py-3 px-4">School</th>
                         <th className="py-3 px-4">Institution</th>
+                        <th className="py-3 px-4">Dean / Head</th>
                         <th className="py-3 px-4">Metrics</th>
                         <th className="py-3 px-4 text-right">Actions</th>
                       </tr>
@@ -1263,6 +998,24 @@ export default function PlatformAdminView() {
                             </div>
                             {s.institutionCode && (
                               <p className="text-[10px] text-muted-foreground font-mono">{s.institutionCode}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            {s.deanName ? (
+                              <div className="min-w-0">
+                                <p className="font-medium text-foreground truncate">{s.deanName}</p>
+                                <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                  {s.deanEmail}
+                                </p>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => openSchoolDrawer(s)}
+                                className="text-[11px] font-medium text-amber-600 hover:underline"
+                                title="Open school to invite a Dean"
+                              >
+                                Not assigned — invite
+                              </button>
                             )}
                           </td>
                           <td className="py-3 px-4">
@@ -1295,133 +1048,6 @@ export default function PlatformAdminView() {
                               <Settings2 className="h-3.5 w-3.5" />
                               Manage
                             </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* TAB 2: Departments Management */}
-          <TabsContent value="departments" className="mt-4 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={deptSearch}
-                  onChange={(e) => setDeptSearch(e.target.value)}
-                  placeholder="Search department by name or code..."
-                  className="pl-9 h-9 text-xs"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Select value={deptInstFilter} onValueChange={(v) => setDeptInstFilter(v)}>
-                  <SelectTrigger className="h-9 text-xs w-[160px]">
-                    <SelectValue placeholder="Institution" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Institutions</SelectItem>
-                    {institutions.map((i) => (
-                      <SelectItem key={i.id} value={i.id}>
-                        {i.code} - {i.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  onClick={() => setAddDeptOpen(true)}
-                  size="sm"
-                  className="gap-1.5 h-9 text-xs font-semibold shrink-0"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Create Department
-                </Button>
-              </div>
-            </div>
-
-            {filteredDepartments.length === 0 ? (
-              <EmptyState
-                icon={GraduationCap}
-                title="No departments found"
-                description={deptSearch ? 'Try a different search term or filter' : 'No departments exist yet. Create your first academic department.'}
-                action={
-                  <Button onClick={() => setAddDeptOpen(true)} size="sm" className="gap-1.5 mt-2">
-                    <Plus className="h-3.5 w-3.5" /> Create Department
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="rounded-2xl border bg-card overflow-hidden shadow-xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-muted/50 border-b text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="py-3 px-4">Department</th>
-                        <th className="py-3 px-4">Institution</th>
-                        <th className="py-3 px-4">Metrics</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {filteredDepartments.map((d) => (
-                        <tr key={d.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="py-3 px-4">
-                            <div className="font-semibold text-foreground">{d.name}</div>
-                            <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                              {d.code}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1.5 font-medium text-foreground">
-                              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span>{d.institutionName || 'Unassigned'}</span>
-                            </div>
-                            {d.institutionCode && (
-                              <p className="text-[10px] text-muted-foreground font-mono">{d.institutionCode}</p>
-                            )}
-                            {d.schoolName && (
-                              <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                                <Layers className="h-3 w-3 text-primary" />
-                                {d.schoolName}
-                              </p>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                              <span><strong className="text-foreground">{d.courseCount ?? 0}</strong> courses</span>
-                              <span>·</span>
-                              <span><strong className="text-foreground">{d.userCount ?? 0}</strong> staff</span>
-                              <span>·</span>
-                              <span><strong className="text-foreground">{d.studentCount ?? 0}</strong> students</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openManageDrawer(d)}
-                                className="h-8 gap-1.5 px-2 text-xs font-semibold text-primary hover:text-primary"
-                                title="Manage department"
-                              >
-                                <Settings2 className="h-3.5 w-3.5" />
-                                Manage
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteDepartment(d)}
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                                title="Delete Department"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1479,8 +1105,10 @@ export default function PlatformAdminView() {
                   onClick={() => {
                     setNewUserData((prev) => ({
                       ...prev,
+                      role: 'LECTURER',
                       institutionId: institutions[0]?.id ?? '',
-                      departmentId: departments[0]?.id ?? '',
+                      departmentId: '',
+                      schoolId: '',
                     }))
                     setAddUserOpen(true)
                   }}
@@ -1511,7 +1139,7 @@ export default function PlatformAdminView() {
                     <thead className="border-b bg-muted/40 text-muted-foreground font-medium">
                       <tr>
                         <th className="py-3 px-4">User</th>
-                        <th className="py-3 px-4">Institution & Dept</th>
+                        <th className="py-3 px-4">Institution & Placement</th>
                         <th className="py-3 px-4">Role</th>
                         <th className="py-3 px-4">Activity</th>
                         <th className="py-3 px-4 text-right">Actions</th>
@@ -1543,9 +1171,16 @@ export default function PlatformAdminView() {
                                   <Building2 className="h-3 w-3 text-muted-foreground" />
                                   <span>{u.institutionName ?? 'Unassigned'}</span>
                                 </div>
-                                <p className="text-[11px] text-muted-foreground">
-                                  {u.departmentName ?? 'No Department'}
-                                </p>
+                                {u.role === 'DEAN' ? (
+                                  <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                    <Layers className="h-3 w-3 text-primary" />
+                                    {u.schoolName ?? 'No School Assigned'}
+                                  </p>
+                                ) : (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {u.departmentName ?? 'No Department'}
+                                  </p>
+                                )}
                               </div>
                             </td>
 
@@ -1821,6 +1456,7 @@ export default function PlatformAdminView() {
                     <SelectContent>
                       <SelectItem value="LECTURER">Lecturer</SelectItem>
                       <SelectItem value="ADMIN">Department Admin</SelectItem>
+                      <SelectItem value="DEAN">Dean / School Head</SelectItem>
                       <SelectItem value="SUPERADMIN">Platform Super Admin</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1846,24 +1482,61 @@ export default function PlatformAdminView() {
                 </Select>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-xs">Assign Department</Label>
-                <Select
-                  value={newUserData.departmentId}
-                  onValueChange={(v) => setNewUserData((p) => ({ ...p, departmentId: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name} ({d.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {newUserData.role === 'DEAN' ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">
+                    Assigned School <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={newUserData.schoolId}
+                    onValueChange={(v) => {
+                      const school = schools.find((s) => s.id === v)
+                      setNewUserData((p) => ({
+                        ...p,
+                        schoolId: v,
+                        ...(school?.institutionId ? { institutionId: school.institutionId } : {}),
+                      }))
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select School" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {schools.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Deans lead a school — they review all its enrollment submissions.
+                  </p>
+                </div>
+              ) : newUserData.role === 'SUPERADMIN' ? (
+                <p className="rounded-xl border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                  Super Admins are platform-only — no department or school assignment.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">Assign Department</Label>
+                  <Select
+                    value={newUserData.departmentId}
+                    onValueChange={(v) => setNewUserData((p) => ({ ...p, departmentId: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.name} ({d.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label className="text-xs">Initial Password <span className="text-destructive">*</span></Label>
@@ -1931,6 +1604,7 @@ export default function PlatformAdminView() {
                     <SelectContent>
                       <SelectItem value="LECTURER">Lecturer</SelectItem>
                       <SelectItem value="ADMIN">Department Admin</SelectItem>
+                      <SelectItem value="DEAN">Dean / School Head</SelectItem>
                       <SelectItem value="SUPERADMIN">Platform Super Admin</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1956,24 +1630,61 @@ export default function PlatformAdminView() {
                 </Select>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-xs">Assigned Department</Label>
-                <Select
-                  value={editUserData.departmentId}
-                  onValueChange={(v) => setEditUserData((p) => ({ ...p, departmentId: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name} ({d.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {editUserData.role === 'DEAN' ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">
+                    Assigned School <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={editUserData.schoolId}
+                    onValueChange={(v) => {
+                      const school = schools.find((s) => s.id === v)
+                      setEditUserData((p) => ({
+                        ...p,
+                        schoolId: v,
+                        ...(school?.institutionId ? { institutionId: school.institutionId } : {}),
+                      }))
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select School" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {schools.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Deans lead a school — they review all its enrollment submissions.
+                  </p>
+                </div>
+              ) : editUserData.role === 'SUPERADMIN' ? (
+                <p className="rounded-xl border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                  Super Admins are platform-only — no department or school assignment.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">Assign Department</Label>
+                  <Select
+                    value={editUserData.departmentId}
+                    onValueChange={(v) => setEditUserData((p) => ({ ...p, departmentId: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.name} ({d.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="p-3 rounded-xl border bg-muted/30 space-y-2">
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
@@ -2078,7 +1789,16 @@ export default function PlatformAdminView() {
                 </Label>
                 <Select
                   value={formData.termSystem}
-                  onValueChange={(v: any) => setFormData((p) => ({ ...p, termSystem: v }))}
+                  onValueChange={(v: any) =>
+                    setFormData((p) => ({
+                      ...p,
+                      termSystem: v,
+                      // Switching models may shrink the calendar (3 → 2 terms).
+                      ...(termSystemMeta(v).count < (p.currentSemester ?? 1)
+                        ? { currentSemester: 1 }
+                        : {}),
+                    }))
+                  }
                 >
                   <SelectTrigger id="inst-term">
                     <SelectValue />
@@ -2086,7 +1806,6 @@ export default function PlatformAdminView() {
                   <SelectContent>
                     <SelectItem value="SEMESTER">Semester System (S1, S2)</SelectItem>
                     <SelectItem value="TRIMESTER">Trimester System (T1, T2, T3)</SelectItem>
-                    <SelectItem value="QUARTER">Quarter System</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2103,9 +1822,11 @@ export default function PlatformAdminView() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="1">Term 1 (current)</SelectItem>
-                    <SelectItem value="2">Term 2 (current)</SelectItem>
-                    <SelectItem value="3">Term 3 (current)</SelectItem>
+                    {Array.from({ length: termSystemMeta(formData.termSystem).count }, (_, i) => (
+                      <SelectItem key={i + 1} value={String(i + 1)}>
+                        {termSystemMeta(formData.termSystem).label} {i + 1} (current)
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -2246,7 +1967,16 @@ export default function PlatformAdminView() {
                   <Label className="text-xs">Academic Calendar System</Label>
                   <Select
                     value={editTarget.termSystem}
-                    onValueChange={(v: any) => setEditTarget({ ...editTarget, termSystem: v })}
+                    onValueChange={(v: any) =>
+                      setEditTarget({
+                        ...editTarget,
+                        termSystem: v,
+                        // Switching models may shrink the calendar (3 → 2 terms).
+                        ...(termSystemMeta(v).count < (editTarget.currentSemester ?? 1)
+                          ? { currentSemester: 1 }
+                          : {}),
+                      })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -2254,7 +1984,6 @@ export default function PlatformAdminView() {
                     <SelectContent>
                       <SelectItem value="SEMESTER">Semester System (Semester 1 / Semester 2)</SelectItem>
                       <SelectItem value="TRIMESTER">Trimester System (Trimester 1 / 2 / 3)</SelectItem>
-                      <SelectItem value="QUARTER">Quarter System</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2271,9 +2000,14 @@ export default function PlatformAdminView() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1">Term 1 (current)</SelectItem>
-                      <SelectItem value="2">Term 2 (current)</SelectItem>
-                      <SelectItem value="3">Term 3 (current)</SelectItem>
+                      {Array.from(
+                        { length: termSystemMeta(editTarget.termSystem).count },
+                        (_, i) => (
+                          <SelectItem key={i + 1} value={String(i + 1)}>
+                            {termSystemMeta(editTarget.termSystem).label} {i + 1} (current)
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                   <p className="text-[11px] text-muted-foreground">
@@ -2428,319 +2162,6 @@ export default function PlatformAdminView() {
         </DialogContent>
       </Dialog>
 
-      {/* ---------- DRAWER: Manage Department (platform dept tooling) ---------- */}
-      <Sheet open={manageDept !== null} onOpenChange={(open) => !open && setManageDept(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto scrollbar-thin">
-          <SheetHeader className="text-left">
-            <SheetTitle className="flex items-center gap-2">
-              <GraduationCap className="h-5 w-5 text-primary" />
-              {manageDept?.name}
-            </SheetTitle>
-            <p className="text-xs text-muted-foreground">
-              Invite the HoD, provision courses, enroll students, and review submissions.
-            </p>
-          </SheetHeader>
-
-          {manageDept && (
-            <div className="space-y-6 px-4 pb-8">
-              {/* --- Invite Head of Department --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Invite Head of Department
-                </h3>
-                <form onSubmit={handleInviteHod} className="space-y-2.5">
-                  <Input
-                    value={inviteName}
-                    onChange={(e) => setInviteName(e.target.value)}
-                    placeholder="HoD full name (optional)"
-                    className="h-10 text-sm"
-                  />
-                  <Input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="HoD email — sends the code by email"
-                    className="h-10 text-sm"
-                  />
-                  <Button type="submit" size="sm" disabled={inviting} className="w-full gap-1.5 font-semibold">
-                    {inviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                    Generate HoD invite code
-                  </Button>
-                </form>
-                {inviteResult && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-1.5">
-                    <p className="text-[11px] font-semibold text-foreground">
-                      {inviteResult.emailed
-                        ? 'Code generated and emailed — it is also shown below.'
-                        : 'Share this code with the new HoD:'}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-2.5 py-1.5 font-mono text-sm font-bold text-primary">
-                        {inviteResult.code}
-                      </code>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 gap-1"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(inviteResult.code)
-                          toast.success('Invite code copied')
-                        }}
-                      >
-                        <Copy className="h-3.5 w-3.5" /> Copy
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* --- Courses: create + bulk upload --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <BookOpen className="h-3.5 w-3.5" />
-                  Courses
-                </h3>
-                <form onSubmit={handleCreateManagedCourse} className="space-y-2.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      value={courseCode}
-                      onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
-                      placeholder="CS301"
-                      className="h-10 font-mono uppercase text-sm"
-                    />
-                    <Select value={courseLevel} onValueChange={setCourseLevel}>
-                      <SelectTrigger className="h-10 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[100, 200, 300, 400, 500, 600].map((l) => (
-                          <SelectItem key={l} value={String(l)}>
-                            Level {l}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Input
-                    value={courseTitle}
-                    onChange={(e) => setCourseTitle(e.target.value)}
-                    placeholder="Course title, e.g. Software Engineering"
-                    className="h-10 text-sm"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select value={courseTerm} onValueChange={setCourseTerm}>
-                      <SelectTrigger className="h-10 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="S1">Semester 1</SelectItem>
-                        <SelectItem value="S2">Semester 2</SelectItem>
-                        <SelectItem value="T1">Trimester 1</SelectItem>
-                        <SelectItem value="T2">Trimester 2</SelectItem>
-                        <SelectItem value="T3">Trimester 3</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={courseLecturerId} onValueChange={setCourseLecturerId}>
-                      <SelectTrigger className="h-10 text-sm">
-                        <SelectValue
-                          placeholder={managedStaff.length === 0 ? 'Loading staff…' : 'Lecturer'}
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {managedStaff.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.title ? `${m.title} ${m.name}` : m.name}
-                            {m.role === 'ADMIN' ? ' (HoD)' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button type="submit" size="sm" disabled={creatingCourse} className="w-full gap-1.5 font-semibold">
-                    {creatingCourse ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                    Create course
-                  </Button>
-                </form>
-                <Textarea
-                  rows={4}
-                  value={bulkCsv}
-                  onChange={(e) => setBulkCsv(e.target.value)}
-                  className="font-mono text-xs"
-                  placeholder={'Bulk upload — one course per line:\nCS301,Software Engineering,300,1\nCS305,Database Systems,300,2'}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleBulkUploadCourses()}
-                  disabled={bulkUploading || !bulkCsv.trim()}
-                  className="w-full gap-1.5 font-semibold"
-                >
-                  {bulkUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
-                  Upload listed courses
-                </Button>
-              </section>
-
-              {/* --- Enroll student manually --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <UserPlus className="h-3.5 w-3.5" />
-                  Enroll student manually
-                </h3>
-                <form onSubmit={handleEnrollManagedStudent} className="space-y-2.5">
-                  <Input
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    placeholder="Student ID, e.g. PHA/0001/26"
-                    className="h-10 font-mono text-sm"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      value={studentFirst}
-                      onChange={(e) => setStudentFirst(e.target.value)}
-                      placeholder="First name"
-                      className="h-10 text-sm"
-                    />
-                    <Input
-                      value={studentLast}
-                      onChange={(e) => setStudentLast(e.target.value)}
-                      placeholder="Last name"
-                      className="h-10 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select value={studentLevel} onValueChange={setStudentLevel}>
-                      <SelectTrigger className="h-10 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[100, 200, 300, 400, 500, 600].map((l) => (
-                          <SelectItem key={l} value={String(l)}>
-                            Level {l}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button type="submit" size="sm" disabled={enrollingStudent} className="h-10 gap-1.5 font-semibold">
-                      {enrollingStudent ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
-                      Enroll student
-                    </Button>
-                  </div>
-                </form>
-              </section>
-
-              {/* --- Student enrollment link --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Student enrollment link
-                </h3>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/enroll?dept=${manageDept.id}`}
-                    className="min-w-0 flex-1 font-mono text-xs"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 gap-1"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(
-                        `${window.location.origin}/enroll?dept=${manageDept.id}`
-                      )
-                      toast.success('Enrollment link copied')
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Students pick their courses during self-enrollment; submissions land below.
-                </p>
-              </section>
-
-              {/* --- Pending submissions --- */}
-              <section className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    <Mail className="h-3.5 w-3.5" />
-                    Enrollment submissions
-                  </h3>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void loadManagedSubs()}
-                    disabled={loadingManagedSubs}
-                    className="h-8 w-8 p-0"
-                    aria-label="Refresh submissions"
-                  >
-                    {loadingManagedSubs ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                </div>
-                {managedSubs === null ? (
-                  <Button size="sm" variant="outline" onClick={() => void loadManagedSubs()} className="w-full">
-                    View pending submissions
-                  </Button>
-                ) : managedSubs.length === 0 ? (
-                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
-                    No pending submissions.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {managedSubs.map((sub) => (
-                      <div key={sub.id} className="rounded-xl border p-3 space-y-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-semibold text-foreground">
-                              {sub.firstName} {sub.lastName}
-                            </p>
-                            <p className="font-mono text-[10px] text-muted-foreground">
-                              {sub.studentId} · Level {sub.level} · {sub.descriptorsCount} face samples
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="shrink-0 border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-400">
-                            PENDING
-                          </Badge>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            disabled={reviewingSubId === sub.id}
-                            onClick={() => void handleReviewManagedSub(sub.id, 'APPROVE')}
-                            className="h-8 flex-1 gap-1 text-xs font-semibold"
-                          >
-                            {reviewingSubId === sub.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            )}
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={reviewingSubId === sub.id}
-                            onClick={() => void handleReviewManagedSub(sub.id, 'REJECT')}
-                            className="h-8 flex-1 text-xs font-semibold text-destructive hover:text-destructive"
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
-
       {/* ---------- DRAWER: Manage School (Dean invite, departments, enroll link) ---------- */}
       <Sheet open={manageSchool !== null} onOpenChange={(open) => !open && setManageSchool(null)}>
         <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto scrollbar-thin">
@@ -2780,6 +2201,69 @@ export default function PlatformAdminView() {
                     {manageSchool.pendingCount ?? 0}
                   </p>
                 </div>
+              </section>
+
+              {/* --- Assigned Institution (PATCH backfills unlinked departments) --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <Building2 className="h-3.5 w-3.5" />
+                  Assigned Institution
+                </h3>
+                <div className="flex gap-2">
+                  <Select
+                    value={schoolInstitutionId}
+                    onValueChange={setSchoolInstitutionId}
+                  >
+                    <SelectTrigger className="h-10 min-w-0 flex-1 text-sm">
+                      <SelectValue placeholder="No institution (unassigned)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {institutions.map((i) => (
+                        <SelectItem key={i.id} value={i.id}>
+                          {i.name} ({i.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    disabled={savingSchoolInstitution}
+                    onClick={() => void handleAssignSchoolInstitution()}
+                    className="h-10 shrink-0 gap-1.5 font-semibold"
+                  >
+                    {savingSchoolInstitution ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    Save
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Assigning an institution also links this school&apos;s departments that have no
+                  institution — fixing their users&apos; institution display and term system.
+                </p>
+              </section>
+
+              {/* --- Current Dean --- */}
+              <section className="space-y-2.5">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Dean / Head
+                </h3>
+                {manageSchool.deanName ? (
+                  <div className="flex items-center gap-2.5 rounded-xl border bg-accent/30 px-3 py-2.5">
+                    <IdentityAvatar name={manageSchool.deanName} className="h-8 w-8" />
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-foreground">
+                        {manageSchool.deanName}
+                      </p>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {manageSchool.deanEmail}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
+                    No Dean assigned yet — invite one below.
+                  </p>
+                )}
               </section>
 
               {/* --- Invite Dean --- */}
@@ -2915,10 +2399,12 @@ export default function PlatformAdminView() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="current">Current (default)</SelectItem>
-                        {Array.from({ length: schoolTermCount }, (_, i) => i + 1).map((n) => (
+                        <SelectItem value="current">
+                          Current ({schoolTermMeta.label} {manageSchool?.currentSemester ?? 1})
+                        </SelectItem>
+                        {Array.from({ length: schoolTermMeta.count }, (_, i) => i + 1).map((n) => (
                           <SelectItem key={n} value={String(n)}>
-                            {schoolTermLabel} {n}
+                            {schoolTermMeta.label} {n}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -2950,7 +2436,7 @@ export default function PlatformAdminView() {
                     <span>
                       Scoped invite — students land with{' '}
                       {schoolLinkLevel !== 'any' ? `Level ${schoolLinkLevel}` : 'any level'}
-                      {schoolLinkTerm !== 'current' ? ` · ${schoolTermLabel} ${schoolLinkTerm}` : ''}{' '}
+                      {schoolLinkTerm !== 'current' ? ` · ${schoolTermMeta.label} ${schoolLinkTerm}` : ''}{' '}
                       preselected and locked, so they see only that cohort&apos;s courses.
                     </span>
                   </p>

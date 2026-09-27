@@ -10,6 +10,7 @@ import {
   GraduationCap,
   KeyRound,
   Link as LinkIcon,
+  ListChecks,
   Loader2,
   Mail,
   Plus,
@@ -17,7 +18,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  Sparkles,
   Ticket,
   Trash2,
   TriangleAlert,
@@ -25,11 +25,29 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { termSystemMeta } from '@/lib/types'
 import type { AccessCode, Department, EnrollmentSubmission } from '@/lib/types'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+
+// Public catalog shape returned by /api/departments/public?school= — the same
+// payload students see on /enroll; powers the readiness checklist and the
+// per-level link chips.
+interface CatalogCourse {
+  id: string
+  code: string
+  title: string
+  level: number
+  semester: number
+}
+interface CatalogDepartment {
+  id: string
+  name: string
+  code: string
+  courses: CatalogCourse[]
+}
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -91,11 +109,14 @@ export default function SchoolView() {
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
-  // School enrollment link scoping — the Dean can wrap the invite to one
-  // level and term so students land on a pre-filtered course list.
-  const [linkLevel, setLinkLevel] = useState('any')
+  // School enrollment link scoping — the Dean shares one link per class/level
+  // for the current term (or an explicit term override), so students land on
+  // a pre-filtered course list.
   const [linkTerm, setLinkTerm] = useState('current')
-  const [termInfo, setTermInfo] = useState<{ termSystem: string; currentSemester: number } | null>(null)
+
+  // Public catalog for the linked school — same payload students see on
+  // /enroll. Powers the readiness checklist and per-level link chips.
+  const [catalog, setCatalog] = useState<CatalogDepartment[] | null>(null)
 
   // Load school departments
   const loadDepartments = useCallback(async () => {
@@ -137,36 +158,29 @@ export default function SchoolView() {
     }
   }, [])
 
+  // Load the linked school's public catalog (readiness + level chips).
+  const loadCatalog = useCallback(async () => {
+    const token = user?.schoolCode || user?.schoolId
+    if (!token) return
+    try {
+      const data = await api<{ departments: CatalogDepartment[] }>(
+        `/api/departments/public?school=${encodeURIComponent(token)}`
+      )
+      setCatalog(data.departments ?? [])
+    } catch {
+      setCatalog(null)
+    }
+  }, [user?.schoolCode, user?.schoolId])
+
   useEffect(() => {
     void loadDepartments()
-  }, [loadDepartments, tick])
+    void loadCatalog()
+  }, [loadDepartments, loadCatalog, tick])
 
   useEffect(() => {
     if (activeTab === 'approvals') void loadSubmissions()
     if (activeTab === 'access') void loadCodes()
   }, [activeTab, loadSubmissions, loadCodes])
-
-  // Term labels for the scoped-link selects (institution-level config, read
-  // from the public school listing; falls back to Semester / 1 on failure).
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const data = await api<{ schools: { id: string; termSystem: string; currentSemester: number }[] }>(
-          '/api/departments/public?list=schools'
-        )
-        const mine = data.schools.find((s) => s.id === user?.schoolId)
-        if (alive && mine) {
-          setTermInfo({ termSystem: mine.termSystem, currentSemester: mine.currentSemester })
-        }
-      } catch {
-        // labels fall back below
-      }
-    })()
-    return () => {
-      alive = false
-    }
-  }, [user?.schoolId])
 
   // Invite HoD / lecturer action (DEAN codes mint ADMIN/LECTURER within the school)
   const handleInvite = async () => {
@@ -281,21 +295,47 @@ export default function SchoolView() {
     toast.success(`${label} copied to clipboard!`)
   }
 
-  const termSystem = termInfo?.termSystem ?? 'SEMESTER'
-  const termLabel = termSystem === 'TRIMESTER' ? 'Trimester' : termSystem === 'QUARTER' ? 'Quarter' : 'Semester'
-  const termCount = termSystem === 'TRIMESTER' ? 3 : termSystem === 'QUARTER' ? 4 : 2
-  const linkScoped = linkLevel !== 'any' || linkTerm !== 'current'
+  // Term labels/count come straight from the Dean's institution record
+  // (Semester → 2 terms, Trimester → 3; no extra fetch needed).
+  const termMeta = termSystemMeta(user?.institutionTermSystem)
+  const currentTerm = user?.institutionCurrentTerm ?? 1
 
-  const getSchoolEnrollUrl = () => {
+  const getSchoolEnrollUrl = (level?: string) => {
     if (typeof window === 'undefined') return '/enroll'
     const params = new URLSearchParams()
     const token = user?.schoolCode || user?.schoolId
     if (token) params.set('school', token)
-    if (linkLevel !== 'any') params.set('level', linkLevel)
+    if (level && level !== 'any') params.set('level', level)
     if (linkTerm !== 'current') params.set('semester', linkTerm)
     const qs = params.toString()
     return `${window.location.origin}/enroll${qs ? `?${qs}` : ''}`
   }
+
+  // Readiness: before the link goes out, every department should have its
+  // courses mounted for the current term (at the right levels).
+  const readiness = useMemo(() => {
+    if (!catalog) return null
+    return catalog.map((d) => {
+      const termCourses = d.courses.filter((c) => c.semester === currentTerm)
+      return {
+        id: d.id,
+        name: d.name,
+        code: d.code,
+        termCount: termCourses.length,
+        levels: Array.from(new Set(termCourses.map((c) => c.level))).sort((a, b) => a - b),
+      }
+    })
+  }, [catalog, currentTerm])
+  const readyCount = readiness?.filter((d) => d.termCount > 0).length ?? 0
+  const allReady = !!readiness && readiness.length > 0 && readyCount === readiness.length
+
+  // Levels that actually exist in the school catalog — one chip per cohort.
+  const linkLevels = useMemo(() => {
+    const levels = new Set<number>()
+    for (const d of catalog ?? []) for (const c of d.courses) levels.add(c.level)
+    const sorted = [...levels].sort((a, b) => a - b)
+    return sorted.length > 0 ? sorted : [100, 200, 300, 400]
+  }, [catalog])
 
   const totals = useMemo(() => {
     const courseCount = departments.reduce((a, d) => a + (d.courseCount ?? 0), 0)
@@ -342,7 +382,16 @@ export default function SchoolView() {
     <div className="mx-auto w-full max-w-4xl">
       <PageHeader
         title={user?.schoolName ?? 'School'}
-        subtitle="School Control — Dean's Office"
+        subtitle={[user?.institutionName, "Dean's Office"].filter(Boolean).join(' · ')}
+        right={
+          <Badge
+            variant="outline"
+            className="gap-1 border-primary/30 bg-primary/5 text-[11px] font-semibold text-primary"
+          >
+            <GraduationCap className="h-3.5 w-3.5" />
+            {termMeta.label} · Term {user?.institutionCurrentTerm ?? 1}
+          </Badge>
+        }
       />
 
       <div className="px-4 lg:px-8 pb-10 space-y-5">
@@ -390,7 +439,62 @@ export default function SchoolView() {
               <StatCard label="Staff" value={totals.staffCount} sub="HoDs & lecturers" icon={Users} />
             </div>
 
-            {/* School enrollment link */}
+            {/* Course-mounting readiness — confirm before the link goes out */}
+            <div className="rounded-2xl border bg-card">
+              <div className="flex items-start justify-between gap-2 p-4 pb-3">
+                <div className="min-w-0 space-y-1">
+                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                    <ListChecks className="h-4 w-4 text-primary" />
+                    Course mounting readiness
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Before sharing the link, confirm every department has its courses mounted for {termMeta.label} {currentTerm}.
+                  </p>
+                </div>
+                {readiness && readiness.length > 0 && (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'shrink-0 text-[11px] font-semibold',
+                      allReady
+                        ? 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                    )}
+                  >
+                    {readyCount}/{readiness.length} ready
+                  </Badge>
+                )}
+              </div>
+              {readiness === null ? (
+                <LoadingBlock label="Checking course mounting…" />
+              ) : readiness.length === 0 ? (
+                <p className="border-t px-4 py-4 text-xs text-muted-foreground">
+                  No departments yet — ask the platform administrator to add them before sharing the link.
+                </p>
+              ) : (
+                <div className="divide-y border-t">
+                  {readiness.map((d) => (
+                    <div key={d.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {d.termCount > 0
+                            ? `${d.termCount} course${d.termCount === 1 ? '' : 's'} for ${termMeta.label} ${currentTerm}${d.levels.length > 0 ? ` · Levels ${d.levels.join(', ')}` : ''}`
+                            : `Nothing mounted for ${termMeta.label} ${currentTerm}`}
+                        </p>
+                      </div>
+                      {d.termCount > 0 ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                      ) : (
+                        <TriangleAlert className="h-4 w-4 shrink-0 text-amber-500" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* School enrollment link — the one channel for student self-enrollment */}
             <div className="rounded-2xl border bg-card p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -401,73 +505,63 @@ export default function SchoolView() {
                   variant="outline"
                   size="sm"
                   className="h-9 gap-1.5 text-xs font-semibold"
-                  onClick={() =>
-                    copyText(getSchoolEnrollUrl(), linkScoped ? 'Scoped School Enrollment Link' : 'School Enrollment Link')
-                  }
+                  onClick={() => copyText(getSchoolEnrollUrl(), 'School Enrollment Link')}
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy Link
                 </Button>
               </div>
 
-              {/* Optional level + term scoping — narrows the student's course list */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1 min-w-0">
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Level
-                  </label>
-                  <Select value={linkLevel} onValueChange={setLinkLevel}>
-                    <SelectTrigger className="h-9 w-full min-w-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="any">Any level</SelectItem>
-                      {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
-                        <SelectItem key={l} value={String(l)}>
-                          Level {l}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1 min-w-0">
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Term
-                  </label>
-                  <Select value={linkTerm} onValueChange={setLinkTerm}>
-                    <SelectTrigger className="h-9 w-full min-w-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="current">Current (default)</SelectItem>
-                      {Array.from({ length: termCount }, (_, i) => i + 1).map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {termLabel} {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Term
+                </label>
+                <Select value={linkTerm} onValueChange={setLinkTerm}>
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current">
+                      Current ({termMeta.label} {currentTerm})
+                    </SelectItem>
+                    {Array.from({ length: termMeta.count }, (_, i) => i + 1).map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {termMeta.label} {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <p className="min-w-0 rounded-lg border bg-muted/40 px-3 py-2.5 font-mono text-xs break-all">
                 {getSchoolEnrollUrl()}
               </p>
-              {linkScoped ? (
-                <p className="text-[11px] text-primary flex items-start gap-1.5">
-                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    Scoped invite — students land with{' '}
-                    {linkLevel !== 'any' ? `Level ${linkLevel}` : 'any level'}
-                    {' · '}
-                    {linkTerm !== 'current' ? `${termLabel} ${linkTerm}` : `the current ${termLabel.toLowerCase()}`}{' '}
-                    preselected and locked, so they see only that cohort&apos;s courses.
-                  </span>
+
+              {/* One-tap cohort links — share per class/level into student groups */}
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Quick share by class
                 </p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Students who open this link land on the school preselected. They pick their level and register courses from any department in the school; submissions arrive in your Approvals queue. Scope it to a level and term above for cohort-specific invites.
-                </p>
-              )}
+                <div className="flex flex-wrap gap-1.5">
+                  {linkLevels.map((l) => (
+                    <Button
+                      key={l}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-full px-3 text-xs font-semibold"
+                      onClick={() => copyText(getSchoolEnrollUrl(String(l)), `Level ${l} enrollment link`)}
+                    >
+                      <Copy className="h-3 w-3" />
+                      Level {l}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                Students who open a link land on {user?.schoolName ?? 'your school'} preselected with that level and{' '}
+                {linkTerm === 'current' ? `the current ${termMeta.label.toLowerCase()}` : `${termMeta.label} ${linkTerm}`} locked —
+                they scan their faces and pick their courses from any department. Submissions arrive in your Approvals queue.
+              </p>
             </div>
 
             {/* Departments */}

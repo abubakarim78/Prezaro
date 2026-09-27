@@ -7,7 +7,8 @@ export type Role = 'LECTURER' | 'ADMIN' | 'DEAN' | 'SUPERADMIN'
 export type SessionMode = 'WALKTHROUGH' | 'KIOSK' | 'MANUAL'
 export type SessionStatus = 'OPEN' | 'COMPLETED' | 'CANCELLED'
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
-export type TermSystem = 'SEMESTER' | 'TRIMESTER' | 'QUARTER'
+/** Academic calendar modes: Semester = 2 terms, Trimester = 3 terms. */
+export type TermSystem = 'SEMESTER' | 'TRIMESTER'
 export type AttendanceMethod = 'FACE' | 'MANUAL' | 'ONLINE'
 export type AttendanceJustification =
   | 'CONSENT_OPT_OUT'
@@ -86,6 +87,10 @@ export interface User {
   institutionId?: string | null
   institutionName?: string | null
   institutionSlug?: string | null
+  /** Institution academic calendar mode — drives term selects app-wide. */
+  institutionTermSystem?: string | null
+  /** Institution's current term (1..2 semester / 1..3 trimester). */
+  institutionCurrentTerm?: number | null
   courseCount?: number
   sessionCount?: number
   createdAt?: string
@@ -104,6 +109,10 @@ export interface School {
   institutionCode?: string | null
   termSystem?: TermSystem
   currentSemester?: number
+  /** Current Dean / School Head, if one is assigned. */
+  deanName?: string | null
+  deanEmail?: string | null
+  deanUserId?: string | null
   departmentCount?: number
   pendingCount?: number
   createdAt?: string
@@ -129,6 +138,23 @@ export function termLabel(c: Pick<Course, 'semester' | 'termSystem'>): string {
 /** Short badge label, e.g. "T2" / "S1". */
 export function termBadge(c: Pick<Course, 'semester' | 'termSystem'>): string {
   return `${c.termSystem === 'TRIMESTER' ? 'T' : 'S'}${c.semester}`
+}
+
+/**
+ * Academic calendar metadata for an institution. Semester systems run
+ * 2 terms (S1/S2), trimester systems run 3 (T1/T2/T3). Unknown or legacy
+ * values (e.g. "QUARTER") normalize to the Semester model.
+ */
+export function termSystemMeta(termSystem?: string | null): {
+  label: string
+  count: 2 | 3
+  short: 'S' | 'T'
+  system: TermSystem
+} {
+  if (termSystem === 'TRIMESTER') {
+    return { label: 'Trimester', count: 3, short: 'T', system: 'TRIMESTER' }
+  }
+  return { label: 'Semester', count: 2, short: 'S', system: 'SEMESTER' }
 }
 
 export interface StudentListItem {
@@ -477,3 +503,30 @@ export interface EnrollmentSubmission {
   reviewedAt?: string | null
 }
 
+// ---- In-app notifications -----------------------------------
+
+export type NotificationType =
+  | 'ENROLLMENT_SUBMITTED'
+  | 'ENROLLMENT_DECIDED'
+  | 'SLICE_DECIDED'
+  | 'STAFF_JOINED'
+  | 'ROLE_UPDATED'
+  | 'STUDENT_ENROLLED'
+  | 'CLASS_REMINDER'
+  | 'POLICY_UPDATED'
+
+export interface NotificationItem {
+  id: string
+  type: NotificationType
+  title: string
+  body: string
+  view?: string | null
+  params?: Record<string, string>
+  readAt?: string | null
+  createdAt: string
+}
+
+export interface NotificationsResponse {
+  notifications: NotificationItem[]
+  unreadCount: number
+}

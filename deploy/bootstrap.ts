@@ -117,17 +117,8 @@ async function main(): Promise<void> {
     console.log('[bootstrap] Created primary institution:', institution.name)
   }
 
-  // ---- 2. Ensure Administration Department exists ----
-  let deptGA = await db.department.findFirst({
-    where: { name: 'General Administration', institutionId: institution.id },
-  })
-  if (!deptGA) {
-    deptGA = await db.department.create({
-      data: { name: 'General Administration', code: 'GA', institutionId: institution.id },
-    })
-  }
-
-  // ---- 3. Ensure Superadmin User exists and is properly configured ----
+  // ---- 2. Ensure Superadmin User exists and is properly configured ----
+  // (platform-only: no department assignment; departments belong to schools)
   const email = (process.env.BOOTSTRAP_EMAIL?.trim().toLowerCase() || 'abubakarima1969@uds.edu.gh')
   const password = process.env.BOOTSTRAP_PASSWORD?.trim() || 'ChangeMe2026!'
   const name = process.env.BOOTSTRAP_NAME?.trim() || 'Alhassan Abubakari'
@@ -142,7 +133,7 @@ async function main(): Promise<void> {
         role: 'SUPERADMIN',
         onboarded: true,
         institutionId: institution.id,
-        departmentId: existingUser.departmentId || deptGA.id,
+        departmentId: null,
         passwordHash,
       },
     })
@@ -157,32 +148,9 @@ async function main(): Promise<void> {
         role: 'SUPERADMIN',
         onboarded: true,
         institutionId: institution.id,
-        departmentId: deptGA.id,
       },
     })
     console.log(`[bootstrap] Successfully created Superadmin user: ${email} (Role: SUPERADMIN)`)
-  }
-
-  // ---- 4. Ensure initial starter HOD access code exists for Computer Science ----
-  const existingHodCode = await db.accessCode.findFirst({
-    where: { code: 'PREZ-HOD-UDS01' },
-  })
-  if (!existingHodCode) {
-    const adminUser = await db.user.findUnique({ where: { email } })
-    if (adminUser) {
-      await db.accessCode.create({
-        data: {
-          code: 'PREZ-HOD-UDS01',
-          role: 'ADMIN',
-          departmentId: deptGA.id,
-          createdById: adminUser.id,
-          maxUses: 5,
-          usedCount: 0,
-          status: 'ACTIVE',
-        },
-      })
-      console.log('[bootstrap] Created initial Department Head access code: PREZ-HOD-UDS01')
-    }
   }
 }
 

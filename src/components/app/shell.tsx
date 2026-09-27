@@ -36,6 +36,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { BrandIcon } from '@/components/brand/brand-logo'
+import { NotificationsBell } from '@/components/app/notifications-bell'
 import { api, clearAuthToken } from '@/lib/api'
 import { clearCachedUser } from '@/lib/session-cache'
 import { pendingCount } from '@/lib/offline'
@@ -129,10 +130,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="hidden lg:flex w-64 flex-col border-r bg-sidebar sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-5 h-16 border-b">
           <BrandIcon className="h-9 w-9 shadow-sm" />
-          <div className="leading-tight">
+          <div className="leading-tight flex-1 min-w-0">
             <p className="font-semibold tracking-tight">Prezaro</p>
             <p className="text-[11px] text-muted-foreground">Face attendance</p>
           </div>
+          <NotificationsBell />
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
@@ -151,7 +153,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {label}
             </button>
           ))}
-          {(user.role === 'ADMIN' || user.role === 'DEAN' || (isSuperAdmin && user.departmentId)) && (
+          {(user.role === 'ADMIN' || user.role === 'DEAN') && (
             <button
               onClick={() => navigate(user.role === 'DEAN' ? 'school' : 'admin')}
               className={cn(
@@ -276,7 +278,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="min-w-0 flex-1 leading-tight">
               <p className="font-semibold tracking-tight text-sm">Prezaro</p>
               <p className="text-[10px] text-muted-foreground truncate">
-                {user.departmentName ?? user.schoolName ?? 'Set up your department'}
+                {user.departmentName ??
+                  user.schoolName ??
+                  user.institutionName ??
+                  (isSuperAdmin ? 'Platform administration' : 'Set up your department')}
               </p>
             </div>
             {(!online || pendingSync > 0) && (
@@ -299,6 +304,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <CalendarDays className="h-[18px] w-[18px]" />
               </button>
             )}
+            <NotificationsBell />
             <button
               onClick={() => navigate('settings')}
               className="h-9 w-9 rounded-lg hover:bg-accent flex items-center justify-center text-muted-foreground"
@@ -320,7 +326,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             isSuperAdmin ? 'grid-cols-4' : 'grid-cols-5'
           )}
         >
-          {NAV.slice(0, isSuperAdmin ? 1 : 2).map(({ view: v, label, icon: Icon }) => (
+          {/* Lecturers keep Timetable up front; HoDs & Deans get Students
+              there — their management surface is the dedicated 4th tab. */}
+          {NAV.filter((n) =>
+            isSuperAdmin
+              ? n.view === 'home'
+              : user.role === 'LECTURER'
+                ? n.view === 'home' || n.view === 'schedule'
+                : n.view === 'home' || n.view === 'students'
+          ).map(({ view: v, label, icon: Icon }) => (
             <NavTab key={v} active={view === v} label={label} onClick={() => navigate(v)}>
               <Icon className="h-[22px] w-[22px]" />
             </NavTab>
@@ -338,7 +352,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {!isSuperAdmin && (
+          {/* Management surfaces become primary destinations for HoDs & Deans */}
+          {!isSuperAdmin && user.role === 'ADMIN' && (
+            <NavTab active={view === 'admin'} label="Department" onClick={() => navTo('admin')}>
+              <ShieldCheck className="h-[22px] w-[22px]" />
+            </NavTab>
+          )}
+          {!isSuperAdmin && user.role === 'DEAN' && (
+            <NavTab active={view === 'school'} label="School" onClick={() => navTo('school')}>
+              <School className="h-[22px] w-[22px]" />
+            </NavTab>
+          )}
+          {!isSuperAdmin && user.role === 'LECTURER' && (
             <NavTab active={view === 'sessions'} label="Sessions" onClick={() => navigate('sessions')}>
               <History className="h-[22px] w-[22px]" />
             </NavTab>
@@ -376,12 +401,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="px-4 pb-6 space-y-1.5">
                 {!isSuperAdmin && (
                   <MoreItem icon={CalendarDays} label="Class Timetable" onClick={() => navTo('schedule')} />
-                )}
-                {(user.role === 'ADMIN' || (isSuperAdmin && user.departmentId)) && (
-                  <MoreItem icon={ShieldCheck} label="Department dashboard" onClick={() => navTo('admin')} />
-                )}
-                {user.role === 'DEAN' && (
-                  <MoreItem icon={School} label="School Control" onClick={() => navTo('school')} />
                 )}
                 {!isSuperAdmin && <MoreItem icon={BarChart3} label="Reports" onClick={() => navTo('reports')} />}
                 {!isSuperAdmin && <MoreItem icon={Settings} label="Settings" onClick={() => navTo('settings')} />}

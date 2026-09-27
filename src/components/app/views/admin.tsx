@@ -25,15 +25,12 @@ import {
   Info,
   Mail,
   Plus,
-  QrCode,
   ShieldCheck,
-  Sparkles,
   Ticket,
   Trash2,
   TrendingUp,
   TriangleAlert,
   UserCheck,
-  UserPlus,
   UserX,
   Users,
   X,
@@ -79,7 +76,8 @@ const CHART_LINE = 'var(--chart-1, #059669)'
 export default function AdminView() {
   const { user, navigate } = useAppStore()
 
-  const [activeTab, setActiveTab] = useState<'analytics' | 'codes' | 'enrollments'>('analytics')
+  const [activeTab, setActiveTab] = useState<'overview' | 'enrollments' | 'access'>('overview')
+  const [showReviewed, setShowReviewed] = useState(false)
   const [report, setReport] = useState<DepartmentReport | null>(null)
   const [reportError, setReportError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -96,12 +94,6 @@ export default function AdminView() {
   const [generatingCode, setGeneratingCode] = useState(false)
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
 
-  // Enrollment share-link state (submission approval moved to the Dean's office)
-  const [shareLinkOpen, setShareLinkOpen] = useState(false)
-  const [selectedShareCourseId, setSelectedShareCourseId] = useState<string>('all')
-  // Optional cohort scoping for the shared link (?level=&semester=)
-  const [shareLinkLevel, setShareLinkLevel] = useState('any')
-  const [shareLinkTerm, setShareLinkTerm] = useState('current')
   const [codeSendEmailImmediately, setCodeSendEmailImmediately] = useState(true)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
@@ -138,8 +130,10 @@ export default function AdminView() {
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'codes') void loadCodes()
-  }, [activeTab, loadCodes])
+    // Only fetch when a department is actually assigned — avoids the
+    // "Department or school ID is required" error on incomplete accounts.
+    if (activeTab === 'access' && user?.departmentId) void loadCodes()
+  }, [activeTab, loadCodes, user?.departmentId])
 
   // Load enrollment requests addressed to this department
   const loadSubmissions = useCallback(async () => {
@@ -292,40 +286,26 @@ export default function AdminView() {
 
   const trendData = useMemo(() => report?.trend ?? [], [report])
 
-  // Requests still awaiting this department's verdict
+  // Requests addressed to this department, split into decisions still owed
+  // and verdicts already recorded (collapsed under a toggle in the UI).
   const myQueue = useMemo(
     () => submissions.filter((s) => s.myStatus != null),
     [submissions]
   )
-  const pendingCount = useMemo(
-    () => myQueue.filter((s) => s.status === 'PENDING' && s.myStatus === 'PENDING').length,
+  const pendingQueue = useMemo(
+    () => myQueue.filter((s) => s.status === 'PENDING' && s.myStatus === 'PENDING'),
     [myQueue]
   )
-
-  const getPublicEnrollUrl = () => {
-    if (typeof window === 'undefined') return '/enroll'
-    const params = new URLSearchParams()
-    if (selectedShareCourseId && selectedShareCourseId !== 'all') {
-      params.set('course', selectedShareCourseId)
-    } else if (user?.departmentId) {
-      params.set('dept', user.departmentId)
-    }
-    // Scoped cohort invite: the level applies to the department-wide link
-    // (a course link already follows its own course's level); the term
-    // applies to both shapes.
-    if ((!selectedShareCourseId || selectedShareCourseId === 'all') && shareLinkLevel !== 'any') {
-      params.set('level', shareLinkLevel)
-    }
-    if (shareLinkTerm !== 'current') params.set('semester', shareLinkTerm)
-    const qs = params.toString()
-    return `${window.location.origin}/enroll${qs ? `?${qs}` : ''}`
-  }
+  const reviewedQueue = useMemo(
+    () => myQueue.filter((s) => !(s.status === 'PENDING' && s.myStatus === 'PENDING')),
+    [myQueue]
+  )
 
   return (
     <div className="mx-auto w-full max-w-4xl">
       <PageHeader
         title={report?.departmentName ?? user?.departmentName ?? 'Department'}
-        subtitle="Department Administration & Control"
+        subtitle="Department Administration"
       />
 
       <div className="px-4 lg:px-8 pb-10 space-y-5">
@@ -333,42 +313,40 @@ export default function AdminView() {
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
           <TabsList className="grid grid-cols-3 w-full h-11 bg-muted/70 p-1 rounded-xl">
             <TabsTrigger
-              value="analytics"
+              value="overview"
               className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
             >
               <BarChart3 className="h-4 w-4 shrink-0" />
-              <span className="hidden min-w-0 truncate sm:inline">Analytics &amp; Attendance</span>
-              <span className="min-w-0 truncate sm:hidden">Analytics</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="codes"
-              className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
-            >
-              <Ticket className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 truncate">Lecturer Access</span>
-              {codes.filter((c) => c.status === 'ACTIVE').length > 0 && (
-                <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                  {codes.filter((c) => c.status === 'ACTIVE').length}
-                </span>
-              )}
+              <span className="min-w-0 truncate">Overview</span>
             </TabsTrigger>
             <TabsTrigger
               value="enrollments"
               className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
             >
               <UserCheck className="h-4 w-4 shrink-0" />
-              <span className="hidden min-w-0 truncate sm:inline">Student Self-Enroll</span>
-              <span className="min-w-0 truncate sm:hidden">Enrollments</span>
-              {pendingCount > 0 && (
+              <span className="min-w-0 truncate">Enrollments</span>
+              {pendingQueue.length > 0 && (
                 <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                  {pendingCount}
+                  {pendingQueue.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger
+              value="access"
+              className="flex min-w-0 items-center justify-center gap-1.5 px-1 text-xs font-semibold rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+            >
+              <Ticket className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">Access</span>
+              {codes.filter((c) => c.status === 'ACTIVE').length > 0 && (
+                <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                  {codes.filter((c) => c.status === 'ACTIVE').length}
                 </span>
               )}
             </TabsTrigger>
           </TabsList>
 
-          {/* TAB 1: ANALYTICS & ATTENDANCE */}
-          <TabsContent value="analytics" className="mt-4 space-y-4">
+          {/* TAB 1: OVERVIEW */}
+          <TabsContent value="overview" className="mt-4 space-y-3">
             {report === null && !reportError ? (
               <LoadingBlock label="Loading department data…" />
             ) : reportError ? (
@@ -590,8 +568,8 @@ export default function AdminView() {
             ) : null}
           </TabsContent>
 
-          {/* TAB 2: LECTURER ACCESS CODES */}
-          <TabsContent value="codes" className="mt-4 space-y-4">
+          {/* TAB 3: ACCESS (LECTURER ACCESS CODES) */}
+          <TabsContent value="access" className="mt-4 space-y-4">
             {/* Header info & action */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border bg-card p-4">
               <div className="space-y-1">
@@ -730,29 +708,21 @@ export default function AdminView() {
             )}
           </TabsContent>
 
-          {/* TAB 3: STUDENT SELF-ENROLLMENTS */}
+          {/* TAB 2: ENROLLMENTS */}
           <TabsContent value="enrollments" className="mt-4 space-y-4">
-            {/* Header info & public link sharing */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border bg-card p-4">
-              <div className="space-y-1">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <UserPlus className="h-4 w-4 text-primary" />
-                  Student Self-Enrollment &amp; Face Capture
-                </h3>
+            {/* Departments never share enrollment links — students self-enroll
+                through the Dean's school-wide link; late additions are manual. */}
+            <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-semibold">Self-enrollment runs through the Dean&apos;s office</p>
                 <p className="text-xs text-muted-foreground">
-                  Students enroll themselves with 3-pose facial scans. Once approved, they appear in their course rosters.
+                  The Dean shares the school enrollment link per level and term — students register their faces and pick their courses there. Requests for {user?.departmentName ?? 'your department'} courses arrive below for you to accept or decline. Students who miss the window can still be added manually from the Students page.
                 </p>
               </div>
-              <Button
-                onClick={() => setShareLinkOpen(true)}
-                variant="outline"
-                className="h-10 text-xs font-semibold gap-1.5 w-full sm:w-auto"
-              >
-                <QrCode className="h-4 w-4" /> Share Link
-              </Button>
             </div>
 
-            {/* Live request queue — HoDs act on their own department's slice */}
+            {/* Live requests — HoDs act on their own department's slice */}
             {submissionsLoading ? (
               <LoadingBlock label="Loading enrollment requests…" />
             ) : myQueue.length === 0 ? (
@@ -764,53 +734,104 @@ export default function AdminView() {
                 />
               </div>
             ) : (
-              <div className="space-y-3">
-                {myQueue.map((sub) => {
-                  const actionable = sub.status === 'PENDING' && sub.myStatus === 'PENDING'
-                  const isApproving = approvingSubId === sub.id
-                  const isRejecting = rejectingSubId === sub.id
+              <>
+                {/* Pending queue — decisions this department still owes */}
+                <div className="rounded-2xl border bg-card">
+                  <div className="flex items-center justify-between gap-2 p-4 pb-3">
+                    <p className="text-sm font-semibold tracking-tight">Pending requests</p>
+                    {pendingQueue.length > 0 && (
+                      <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 tabular-nums">
+                        {pendingQueue.length} awaiting you
+                      </span>
+                    )}
+                  </div>
+                  {pendingQueue.length === 0 ? (
+                    <div className="border-t px-4 py-6 text-center text-xs text-muted-foreground">
+                      Nothing waiting on your department — you&apos;re all caught up.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 border-t p-4">
+                      {pendingQueue.map((sub) => {
+                        const isApproving = approvingSubId === sub.id
+                        const isRejecting = rejectingSubId === sub.id
 
-                  return (
-                    <EnrollmentRequestCard
-                      key={sub.id}
-                      submission={sub}
-                      actions={
-                        actionable ? (
-                          <>
-                            <Button
-                              variant="outline"
-                              className="min-h-11 gap-1 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              onClick={() => handleReviewSubmission(sub.id, 'REJECT')}
-                              disabled={isApproving || isRejecting}
-                            >
-                              {isRejecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-                              Decline
-                            </Button>
-                            <Button
-                              className="min-h-11 gap-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={() => handleReviewSubmission(sub.id, 'APPROVE')}
-                              disabled={isApproving || isRejecting}
-                            >
-                              {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              Accept
-                            </Button>
-                          </>
-                        ) : sub.myStatus === 'APPROVED' ? (
-                          <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-600/10 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                            Accepted into {user?.departmentName ?? 'your department'}
-                          </div>
-                        ) : (
-                          <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border bg-muted/40 py-2.5 text-xs font-medium text-muted-foreground">
-                            <X className="h-3.5 w-3.5 shrink-0" />
-                            Declined for your department
-                          </div>
+                        return (
+                          <EnrollmentRequestCard
+                            key={sub.id}
+                            submission={sub}
+                            actions={
+                              <>
+                                <Button
+                                  variant="outline"
+                                  className="min-h-11 gap-1 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                  onClick={() => handleReviewSubmission(sub.id, 'REJECT')}
+                                  disabled={isApproving || isRejecting}
+                                >
+                                  {isRejecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                                  Decline
+                                </Button>
+                                <Button
+                                  className="min-h-11 gap-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  onClick={() => handleReviewSubmission(sub.id, 'APPROVE')}
+                                  disabled={isApproving || isRejecting}
+                                >
+                                  {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                  Accept into {user?.departmentName ?? 'department'}
+                                </Button>
+                              </>
+                            }
+                          />
                         )
-                      }
-                    />
-                  )
-                })}
-              </div>
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Reviewed — collapsed under a secondary toggle */}
+                {reviewedQueue.length > 0 && (
+                  <div className="rounded-2xl border bg-card">
+                    <button
+                      type="button"
+                      onClick={() => setShowReviewed((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 p-4 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <p className="text-sm font-semibold tracking-tight">Reviewed</p>
+                      <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                        {reviewedQueue.length} handled
+                        <ChevronRight className={cn('h-4 w-4 transition-transform', showReviewed && 'rotate-90')} />
+                      </span>
+                    </button>
+                    {showReviewed && (
+                      <div className="space-y-3 border-t p-4">
+                        {reviewedQueue.map((sub) => (
+                          <EnrollmentRequestCard
+                            key={sub.id}
+                            submission={sub}
+                            actions={
+                              sub.myStatus === 'APPROVED' ? (
+                                <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-600/10 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                  Accepted into {user?.departmentName ?? 'your department'}
+                                </div>
+                              ) : sub.myStatus === 'REJECTED' ? (
+                                <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border bg-muted/40 py-2.5 text-xs font-medium text-muted-foreground">
+                                  <X className="h-3.5 w-3.5 shrink-0" />
+                                  Declined for your department
+                                </div>
+                              ) : (
+                                <div className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border bg-muted/40 py-2.5 text-xs font-medium text-muted-foreground">
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                  Finalized — no action needed from your department
+                                </div>
+                              )
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
         </Tabs>
@@ -931,141 +952,6 @@ export default function AdminView() {
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG: SHARE ENROLLMENT LINK */}
-      <Dialog open={shareLinkOpen} onOpenChange={setShareLinkOpen}>
-        <DialogContent className="max-h-[92dvh] overflow-y-auto scrollbar-thin sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5 text-primary" />
-              Student Self-Enrollment Link
-            </DialogTitle>
-            <DialogDescription>
-              Share this link with students in your department so they can register their face attendance biometric profile.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Target Enrollment Scope (Course or Entire Department)
-              </label>
-              <Select value={selectedShareCourseId} onValueChange={setSelectedShareCourseId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    Department-Wide Link (Students select courses)
-                  </SelectItem>
-                  {report?.courses.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      Course: {c.code} — {c.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Optional level + term scoping — wraps the link to one cohort */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5 min-w-0">
-                <label className="text-xs font-semibold text-foreground">
-                  Level
-                </label>
-                <Select
-                  value={shareLinkLevel}
-                  onValueChange={setShareLinkLevel}
-                  disabled={!!selectedShareCourseId && selectedShareCourseId !== 'all'}
-                >
-                  <SelectTrigger className="w-full min-w-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="any">Any level</SelectItem>
-                    {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
-                      <SelectItem key={l} value={String(l)}>
-                        Level {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5 min-w-0">
-                <label className="text-xs font-semibold text-foreground">
-                  Term
-                </label>
-                <Select value={shareLinkTerm} onValueChange={setShareLinkTerm}>
-                  <SelectTrigger className="w-full min-w-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current">Current (default)</SelectItem>
-                    {[1, 2, 3, 4].map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        Term {n}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            {(shareLinkLevel !== 'any' || shareLinkTerm !== 'current') && (
-              <p className="flex items-start gap-1.5 text-[11px] text-primary">
-                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Scoped invite — students land with{' '}
-                  {shareLinkLevel !== 'any' ? `Level ${shareLinkLevel}` : 'any level'}
-                  {shareLinkTerm !== 'current' ? ` · Term ${shareLinkTerm}` : ''} preselected and
-                  locked, so they see only that cohort&apos;s courses.
-                </span>
-              </p>
-            )}
-
-            <div className="rounded-xl border bg-muted/40 p-3 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-foreground min-w-0">
-                  {selectedShareCourseId === 'all'
-                    ? 'Department-Wide Enrollment Link'
-                    : 'Specific Course Direct Enrollment Link'}
-                </p>
-                {selectedShareCourseId !== 'all' && (
-                  <Badge variant="outline" className="text-[10px] font-mono border-primary/30 text-primary">
-                    Auto-enrolled on approval
-                  </Badge>
-                )}
-              </div>
-              <p className="min-w-0 rounded-lg border bg-background px-3 py-2.5 font-mono text-xs break-all">
-                {getPublicEnrollUrl()}
-              </p>
-              <Button
-                size="sm"
-                className="shrink-0 gap-1.5 font-semibold w-full sm:w-auto"
-                onClick={() => copyText(getPublicEnrollUrl(), selectedShareCourseId === 'all' ? 'Department Enrollment Link' : 'Course Enrollment Link')}
-              >
-                <Copy className="h-3.5 w-3.5" /> Copy Link
-              </Button>
-            </div>
-
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground space-y-1">
-              <p className="font-semibold text-foreground flex items-center gap-1.5">
-                <Info className="h-4 w-4 text-primary" /> Student Experience:
-              </p>
-              <ul className="list-disc pl-4 space-y-0.5">
-                <li>Students enter their student ID and name; a scoped link pre-locks their level and term.</li>
-                <li>The browser camera guides them through 3 face poses (center, tilt right, tilt left).</li>
-                <li>Face descriptors are computed directly on device for privacy.</li>
-                <li>Submissions arrive for review by your department and the Dean&apos;s office.</li>
-              </ul>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button className="w-full" onClick={() => setShareLinkOpen(false)}>
-              Done
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

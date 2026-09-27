@@ -105,6 +105,11 @@ export function userDTO(
     institutionId: u.institutionId ?? null,
     institutionName: u.institution?.name ?? null,
     institutionSlug: u.institution?.slug ?? null,
+    // Academic calendar of the user's institution — drives term selects
+    // app-wide (Semester = 2 terms, Trimester = 3).
+    institutionTermSystem:
+      u.institution?.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
+    institutionCurrentTerm: u.institution?.currentSemester ?? null,
   }
 }
 

@@ -9,6 +9,7 @@ import {
   requireSuperAdmin,
   zodMessage,
 } from '../../../_lib/helpers'
+import { institutionAdmins, notifyUsers } from '../../../_lib/notify'
 import type { Institution } from '@/lib/types'
 
 const updateInstitutionSchema = z.object({
@@ -159,6 +160,14 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         ...(data.primaryColor !== undefined && { primaryColor: data.primaryColor || '#059669' }),
         ...(data.featuresJson !== undefined && { featuresJson: data.featuresJson }),
       },
+    })
+
+    // In-app: institution admins hear about policy/config changes (swallow-safe).
+    const policyAudience = await institutionAdmins(id)
+    await notifyUsers(policyAudience, {
+      type: 'POLICY_UPDATED',
+      title: 'Institution policies updated',
+      body: `${existing.name}: platform settings or enrollment policies were updated by the platform team`,
     })
 
     return NextResponse.json({ institution: updated })

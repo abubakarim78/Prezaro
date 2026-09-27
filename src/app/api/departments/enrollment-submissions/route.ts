@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { getSessionUser, requireUser } from '@/lib/auth'
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError, handle, readJson, zodMessage } from '../../_lib/helpers'
+import { departmentAdmins, notifyUsers } from '../../_lib/notify'
 import { enrollmentRequestHtml, queueEmail } from '@/lib/email'
 import type { EnrollmentApprovalStatus, EnrollmentSubmission } from '@/lib/types'
 
@@ -154,6 +155,8 @@ export async function POST(req: Request) {
       deptGroups.set(c.departmentId, list)
     }
 
+    const studentName = `${data.firstName} ${data.lastName}`
+
     if (deptGroups.size > 0) {
       await db.enrollmentApproval.createMany({
         data: Array.from(deptGroups.keys()).map((departmentId) => ({
@@ -169,11 +172,10 @@ export async function POST(req: Request) {
       const [admins, schoolRow] = await Promise.all([
         db.user.findMany({
           where: { role: 'ADMIN', departmentId: { in: deptIds } },
-          select: { email: true, departmentId: true, department: { select: { name: true } } },
+          select: { id: true, email: true, departmentId: true, department: { select: { name: true } } },
         }),
         schoolId ? db.school.findUnique({ where: { id: schoolId }, select: { name: true } }) : null,
       ])
-      const studentName = `${data.firstName} ${data.lastName}`
       for (const admin of admins) {
         if (!admin.departmentId) continue
         const deptCourses = deptGroups.get(admin.departmentId) ?? []
@@ -192,6 +194,27 @@ export async function POST(req: Request) {
           meta: { submissionId: sub.id, departmentId: admin.departmentId },
         })
       }
+
+      // In-app: same slice audience as the email (notifyUsers is swallow-safe).
+      await notifyUsers(admins.map((a) => a.id), {
+        type: 'ENROLLMENT_SUBMITTED',
+        title: 'New enrollment request',
+        body: `${studentName} (${cleanStudentId}) requested enrollment in your department`,
+        view: 'admin',
+        params: { submissionId: sub.id },
+      })
+    }
+
+    // In-app: the school's Dean sees every request for their school.
+    if (schoolId) {
+      const dean = await db.user.findFirst({ where: { role: 'DEAN', schoolId }, select: { id: true } })
+      await notifyUsers([dean?.id], {
+        type: 'ENROLLMENT_SUBMITTED',
+        title: 'New enrollment request',
+        body: `${studentName} (${cleanStudentId}) requested enrollment in your school`,
+        view: 'school',
+        params: { submissionId: sub.id },
+      })
     }
 
     return NextResponse.json({
@@ -452,6 +475,85 @@ export async function PATCH(req: Request) {
       return 'PENDING'
     }
 
+    // ---- in-app notification helpers (notifyUsers is swallow-safe) ----
+
+    /** The Dean owning the submission's school, if any. */
+    const deanIdFor = async () => {
+      const sid = sub.schoolId ?? sub.department?.schoolId ?? null
+      if (!sid) return null
+      const dean = await db.user.findFirst({ where: { role: 'DEAN', schoolId: sid }, select: { id: true } })
+      return dean?.id ?? null
+    }
+
+    /** Decision audiences span HoDs (view 'admin') and the Dean (view 'school'). */
+    const notifyDecisionAudience = async (
+      userIds: (string | null | undefined)[],
+      payload: { type: 'SLICE_DECIDED' | 'ENROLLMENT_DECIDED'; title: string; body: string }
+    ) => {
+      const ids = Array.from(new Set(userIds.filter((id): id is string => Boolean(id))))
+      if (ids.length === 0) return
+      const rows = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, role: true } })
+      await notifyUsers(rows.filter((r) => r.role !== 'DEAN').map((r) => r.id), {
+        ...payload,
+        view: 'admin',
+        params: { submissionId },
+      })
+      await notifyUsers(rows.filter((r) => r.role === 'DEAN').map((r) => r.id), {
+        ...payload,
+        view: 'school',
+        params: { submissionId },
+      })
+    }
+
+    /** Slice verdict → peer HoDs + Dean; unanimous verdict → other reviewers. */
+    const broadcastHoDOutcome = async (
+      finalized: 'PENDING' | 'APPROVED' | 'REJECTED',
+      action: 'APPROVE' | 'REJECT'
+    ) => {
+      const studentLabel = `${sub.firstName} ${sub.lastName} (${sub.studentId})`
+      const deptLabel = user.department?.name ?? 'your department'
+      if (finalized === 'PENDING') {
+        const peerRows = await db.enrollmentApproval.findMany({
+          where: { submissionId, departmentId: { not: user.departmentId ?? '' } },
+          select: { departmentId: true },
+        })
+        const peerIds = await departmentAdmins(peerRows.map((r) => r.departmentId))
+        await notifyDecisionAudience([...peerIds, await deanIdFor()], {
+          type: 'SLICE_DECIDED',
+          title: `Enrollment slice ${action === 'APPROVE' ? 'accepted' : 'declined'}`,
+          body: `${user.name ?? 'A department head'} ${action === 'APPROVE' ? 'accepted' : 'declined'} ${studentLabel} for ${deptLabel}`,
+        })
+      } else {
+        const reviewers = await db.enrollmentApproval.findMany({
+          where: { submissionId, reviewerId: { not: null }, NOT: { reviewerId: user.id } },
+          select: { reviewerId: true },
+        })
+        await notifyDecisionAudience(
+          reviewers.map((r) => r.reviewerId),
+          {
+            type: 'ENROLLMENT_DECIDED',
+            title: finalized === 'APPROVED' ? 'Enrollment approved' : 'Enrollment rejected',
+            body: `${studentLabel}'s enrollment was ${finalized === 'APPROVED' ? 'approved' : 'rejected'} — all slices agreed`,
+          }
+        )
+      }
+    }
+
+    /** Lecturers whose courses just received this student. */
+    const notifyCourseLecturers = async (courseIds: string[]) => {
+      if (courseIds.length === 0) return
+      const lecturers = await db.course.findMany({
+        where: { id: { in: courseIds } },
+        select: { lecturerId: true, code: true },
+      })
+      await notifyUsers(lecturers.map((l) => l.lecturerId), {
+        type: 'STUDENT_ENROLLED',
+        title: 'New student enrolled',
+        body: `${sub.firstName} ${sub.lastName} (${sub.studentId}) was enrolled in ${lecturers.map((l) => l.code).join(', ')}`,
+        view: 'students',
+      })
+    }
+
     // ---- HoD slice review (ADMIN acts only on their own row) ----
     if (user.role === 'ADMIN') {
       if (!user.departmentId) throw new ForbiddenError('No department is assigned to your account')
@@ -485,6 +587,11 @@ export async function PATCH(req: Request) {
           data: { status: 'APPROVED', reviewerId: user.id, reviewedAt: new Date() },
         })
         const finalized = await finalizeIfUnanimous()
+
+        // In-app: lecturers of the just-enrolled slice + decision broadcast.
+        await notifyCourseLecturers(sliceCourses.map((c) => c.id))
+        await broadcastHoDOutcome(finalized, action)
+
         return NextResponse.json({ ok: true, status: 'APPROVED', finalized, studentId: student.id, enrolledCount })
       }
 
@@ -499,6 +606,10 @@ export async function PATCH(req: Request) {
         },
       })
       const finalized = await finalizeIfUnanimous()
+
+      // In-app: decision broadcast (swallow-safe).
+      await broadcastHoDOutcome(finalized, action)
+
       return NextResponse.json({ ok: true, status: 'REJECTED', finalized })
     }
 
@@ -533,6 +644,21 @@ export async function PATCH(req: Request) {
           reviewedAt: new Date(),
         },
       })
+
+      // In-app: all other reviewers hear the final verdict (swallow-safe).
+      const reviewers = await db.enrollmentApproval.findMany({
+        where: { submissionId, reviewerId: { not: null }, NOT: { reviewerId: user.id } },
+        select: { reviewerId: true },
+      })
+      await notifyDecisionAudience(
+        reviewers.map((r) => r.reviewerId),
+        {
+          type: 'ENROLLMENT_DECIDED',
+          title: 'Enrollment rejected',
+          body: `${sub.firstName} ${sub.lastName} (${sub.studentId})'s enrollment was rejected by ${user.name ?? "the Dean's office"}`,
+        }
+      )
+
       return NextResponse.json({ ok: true, status: 'REJECTED' })
     }
 
@@ -554,6 +680,21 @@ export async function PATCH(req: Request) {
         reviewedAt: new Date(),
       },
     })
+
+    // In-app: lecturers of every enrolled course + other reviewers hear it.
+    await notifyCourseLecturers(courseIds)
+    const finalReviewers = await db.enrollmentApproval.findMany({
+      where: { submissionId, reviewerId: { not: null }, NOT: { reviewerId: user.id } },
+      select: { reviewerId: true },
+    })
+    await notifyDecisionAudience(
+      finalReviewers.map((r) => r.reviewerId),
+      {
+        type: 'ENROLLMENT_DECIDED',
+        title: 'Enrollment approved',
+        body: `${sub.firstName} ${sub.lastName} (${sub.studentId})'s enrollment was approved by ${user.name ?? "the Dean's office"}`,
+      }
+    )
 
     return NextResponse.json({
       ok: true,
