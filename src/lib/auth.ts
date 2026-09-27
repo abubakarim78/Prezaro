@@ -143,7 +143,13 @@ export async function getSessionUser(req: Request): Promise<AuthUser | null> {
     if (!payload) return null
     return await db.user.findUnique({
       where: { id: payload.sub },
-      include: { department: true, institution: true, school: true },
+      include: {
+        department: true,
+        institution: true,
+        // School's institution backs the term calendar when the user
+        // themselves has no institution (school-homed Deans).
+        school: { include: { institution: true } },
+      },
     })
   }
   // 2) httpOnly cookie — used by the installed PWA / top-level browsing.
@@ -153,7 +159,11 @@ export async function getSessionUser(req: Request): Promise<AuthUser | null> {
   if (!payload) return null
   return await db.user.findUnique({
     where: { id: payload.sub },
-    include: { department: true, institution: true, school: true },
+    include: {
+      department: true,
+      institution: true,
+      school: { include: { institution: true } },
+    },
   })
 }
 

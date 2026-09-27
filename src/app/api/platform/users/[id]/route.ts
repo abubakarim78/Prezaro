@@ -105,7 +105,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       where: { id },
       data: updatePayload,
       include: {
-        institution: { select: { id: true, name: true, slug: true } },
+        institution: {
+          select: { id: true, name: true, slug: true, termSystem: true, currentSemester: true },
+        },
         department: { select: { id: true, name: true, code: true } },
         school: { select: { id: true, name: true, code: true } },
       },
@@ -135,6 +137,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         institutionId: updated.institutionId ?? null,
         institutionName: updated.institution?.name ?? null,
         institutionSlug: updated.institution?.slug ?? null,
+        // Term calendar rides along so clients holding this payload keep
+        // rendering term selects from the institution's calendar model.
+        institutionTermSystem:
+          updated.institution?.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
+        institutionCurrentTerm: updated.institution?.currentSemester ?? null,
       },
     })
   })

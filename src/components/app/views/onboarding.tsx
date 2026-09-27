@@ -17,7 +17,7 @@ import { toast } from 'sonner'
 import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import type { Course, CoursesResponse, DepartmentsResponse, TermSystem, User } from '@/lib/types'
-import { termBadge } from '@/lib/types'
+import { termBadge, termSystemMeta } from '@/lib/types'
 import { FaceScanMark } from '@/components/brand/face-scan-mark'
 import { BrandIcon } from '@/components/brand/brand-logo'
 import { Button } from '@/components/ui/button'
@@ -45,14 +45,14 @@ interface PendingCourse {
   termSystem: TermSystem
 }
 
-/** Term select values: S1/S2 = semesters, T1/T2/T3 = trimesters. */
-const TERM_OPTIONS: { value: string; label: string }[] = [
-  { value: 'S1', label: 'Semester 1' },
-  { value: 'S2', label: 'Semester 2' },
-  { value: 'T1', label: 'Trimester 1' },
-  { value: 'T2', label: 'Trimester 2' },
-  { value: 'T3', label: 'Trimester 3' },
-]
+/** Term select options for one calendar model: S1/S2 or T1/T2/T3. */
+function termOptions(termSystem?: string | null): { value: string; label: string }[] {
+  const meta = termSystemMeta(termSystem)
+  return Array.from({ length: meta.count }, (_, i) => ({
+    value: `${meta.short}${i + 1}`,
+    label: `${meta.label} ${i + 1}`,
+  }))
+}
 
 function parseTerm(value: string): { semester: number; termSystem: TermSystem } {
   const trimester = value.startsWith('T')
@@ -81,14 +81,17 @@ export default function OnboardingView() {
   const [newDeptName, setNewDeptName] = useState('')
   const [newDeptCode, setNewDeptCode] = useState('')
 
-  // Step 3 — courses
+  // Step 3 — courses. Term options come from the institution's calendar
+  // (set by the platform super admin) and default to its current term.
+  const termMeta = termSystemMeta(user?.institutionTermSystem)
+  const defaultTerm = `${termMeta.short}${user?.institutionCurrentTerm ?? 1}`
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [pendingCourses, setPendingCourses] = useState<PendingCourse[]>([])
   const [addOpen, setAddOpen] = useState(false)
   const [cCode, setCCode] = useState('')
   const [cTitle, setCTitle] = useState('')
   const [cLevel, setCLevel] = useState<string>('100')
-  const [cTerm, setCTerm] = useState<string>('S1')
+  const [cTerm, setCTerm] = useState<string>(defaultTerm)
 
   // Finish
   const [finishing, setFinishing] = useState(false)
@@ -152,7 +155,7 @@ export default function OnboardingView() {
     setCCode('')
     setCTitle('')
     setCLevel('100')
-    setCTerm('S1')
+    setCTerm(defaultTerm)
     setAddOpen(false)
     toast.success('Course added to your profile')
   }
@@ -532,7 +535,7 @@ export default function OnboardingView() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {TERM_OPTIONS.map((t) => (
+                            {termOptions(user?.institutionTermSystem).map((t) => (
                               <SelectItem key={t.value} value={t.value}>
                                 {t.label}
                               </SelectItem>

@@ -53,7 +53,13 @@ export async function POST(req: Request) {
         ...(deptId !== undefined ? { departmentId: deptId } : {}),
         onboarded: true,
       },
-      include: { department: true },
+      // Institution (or the school's) must ride along — the client replaces
+      // its stored user with this payload and the term selects depend on it.
+      include: {
+        department: true,
+        institution: true,
+        school: { include: { institution: true } },
+      },
     })
     return NextResponse.json({ user: userDTO(updated) })
   })

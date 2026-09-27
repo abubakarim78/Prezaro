@@ -22,6 +22,7 @@ import { api, getErrorMessage } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import {
   termLabel,
+  termSystemMeta,
   type Course,
   type CoursesResponse,
   type Department,
@@ -51,14 +52,14 @@ import { EmptyState, PageHeader } from '@/components/app/shared'
 
 const LEVELS = [100, 200, 300, 400, 500, 600] as const
 
-/** Term select values: S1/S2 = semesters, T1/T2/T3 = trimesters. */
-const TERM_OPTIONS: { value: string; label: string }[] = [
-  { value: 'S1', label: 'Semester 1' },
-  { value: 'S2', label: 'Semester 2' },
-  { value: 'T1', label: 'Trimester 1' },
-  { value: 'T2', label: 'Trimester 2' },
-  { value: 'T3', label: 'Trimester 3' },
-]
+/** Term select options for one calendar model: S1/S2 or T1/T2/T3. */
+function termOptions(termSystem?: string | null): { value: string; label: string }[] {
+  const meta = termSystemMeta(termSystem)
+  return Array.from({ length: meta.count }, (_, i) => ({
+    value: `${meta.short}${i + 1}`,
+    label: `${meta.label} ${i + 1}`,
+  }))
+}
 
 function parseTerm(value: string): { semester: number; termSystem: TermSystem } {
   const trimester = value.startsWith('T')
@@ -302,11 +303,26 @@ function CourseForm({
   showLecturer?: boolean
 }) {
   const user = useAppStore((s) => s.user)
+  // Term options follow the institution's academic calendar (set by the
+  // platform super admin); new courses default to its current term.
+  const termMeta = termSystemMeta(user?.institutionTermSystem)
+  const defaultTerm = `${termMeta.short}${user?.institutionCurrentTerm ?? 1}`
+  // A course mounted under a legacy calendar keeps its own term selectable.
+  const legacyTerm =
+    initial && initial.termSystem !== termMeta.system
+      ? {
+          value: termToValue(initial.semester, initial.termSystem),
+          label: termLabel(initial),
+        }
+      : null
+  const termOptionsList = legacyTerm
+    ? [legacyTerm, ...termOptions(user?.institutionTermSystem)]
+    : termOptions(user?.institutionTermSystem)
   const [code, setCode] = useState(initial?.code ?? '')
   const [title, setTitle] = useState(initial?.title ?? '')
   const [level, setLevel] = useState(String(initial?.level ?? 100))
   const [term, setTerm] = useState(
-    initial ? termToValue(initial.semester, initial.termSystem) : 'S1'
+    initial ? termToValue(initial.semester, initial.termSystem) : defaultTerm
   )
   const [lecturerId, setLecturerId] = useState(initial?.lecturerId ?? user?.id ?? '')
   const [staff, setStaff] = useState<StaffMember[] | null>(null)
@@ -442,7 +458,7 @@ function CourseForm({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TERM_OPTIONS.map((t) => (
+            {termOptionsList.map((t) => (
               <SelectItem key={t.value} value={t.value}>
                 {t.label}
               </SelectItem>

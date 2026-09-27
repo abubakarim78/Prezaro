@@ -132,7 +132,8 @@ export async function POST(req: Request) {
           include: {
             department: true,
             institution: true,
-            school: true,
+            // school.institution backs the term calendar for Deans.
+            school: { include: { institution: true } },
           },
         })
       } else {
@@ -147,7 +148,7 @@ export async function POST(req: Request) {
           include: {
             department: true,
             institution: true,
-            school: true,
+            school: { include: { institution: true } },
           },
         })
       }

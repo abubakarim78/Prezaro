@@ -85,11 +85,16 @@ export function userDTO(
   u: User & {
     department?: Department | null
     institution?: import('@prisma/client').Institution | null
-    school?: import('@prisma/client').School | null
+    school?: (import('@prisma/client').School & {
+      institution?: import('@prisma/client').Institution | null
+    }) | null
   }
 ): UserDTO {
   const role: UserDTO['role'] =
     u.role === 'SUPERADMIN' || u.role === 'DEAN' || u.role === 'ADMIN' ? u.role : 'LECTURER'
+  // Academic calendar source: the user's institution, falling back to the
+  // school's (Deans are school-homed and may lack their own institution).
+  const inst = u.institution ?? u.school?.institution ?? null
   return {
     id: u.id,
     email: u.email,
@@ -107,9 +112,8 @@ export function userDTO(
     institutionSlug: u.institution?.slug ?? null,
     // Academic calendar of the user's institution — drives term selects
     // app-wide (Semester = 2 terms, Trimester = 3).
-    institutionTermSystem:
-      u.institution?.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
-    institutionCurrentTerm: u.institution?.currentSemester ?? null,
+    institutionTermSystem: inst?.termSystem === 'TRIMESTER' ? 'TRIMESTER' : 'SEMESTER',
+    institutionCurrentTerm: inst?.currentSemester ?? null,
   }
 }
 
