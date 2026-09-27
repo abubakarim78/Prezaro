@@ -262,6 +262,41 @@ export function welcomeEmailHtml(name: string): string {
   )
 }
 
+/**
+ * Credentials email for staff accounts created directly by the platform
+ * administrator (Add User) — includes the initial password so the new
+ * staff member can sign in immediately, plus a change-it reminder.
+ */
+export function staffAccountEmailHtml(
+  name: string,
+  email: string,
+  password: string,
+  roleLabel: string,
+  institutionName: string | null,
+  placementName: string | null,
+  loginUrl: string,
+): string {
+  return layout(
+    `Your Prezaro account is ready, ${escapeHtml(name)}`,
+    row(`A <strong>${escapeHtml(roleLabel)}</strong> account was created for you by the platform administrator.`) +
+      highlight(`
+        <div style="font-size:12px;color:${BRAND.muted};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">Sign-in details</div>
+        <div style="line-height:1.8;">
+          <strong>Email:</strong> ${escapeHtml(email)}<br/>
+          <strong>Initial password:</strong> <span style="font-family:monospace;font-size:16px;font-weight:700;letter-spacing:0.06em;">${escapeHtml(password)}</span><br/>
+          <strong>Role:</strong> ${escapeHtml(roleLabel)}${institutionName ? `<br/><strong>Institution:</strong> ${escapeHtml(institutionName)}` : ''}${placementName ? `<br/><strong>Placement:</strong> ${escapeHtml(placementName)}` : ''}
+        </div>
+      `) +
+      row(`
+        <div style="text-align:center;padding:16px 0;">
+          <a href="${loginUrl}" style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 28px;border-radius:10px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Sign in to Prezaro &rarr;</a>
+        </div>
+      `) +
+      row('For security, please change this initial password after your first sign-in under Settings.'),
+    'Prezaro staff account notification.',
+  )
+}
+
 export function newAccountAlertHtml(name: string, email: string, role: string): string {
   return layout(
     'New account registered',

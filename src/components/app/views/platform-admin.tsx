@@ -10,6 +10,8 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   Globe2,
   GraduationCap,
   KeyRound,
@@ -193,6 +195,9 @@ export default function PlatformAdminView() {
   const [logsOpen, setLogsOpen] = useState(false)
   const [logs, setLogs] = useState<any[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
+  // Rendered-body preview inside the Outbox Audit dialog.
+  const [logBody, setLogBody] = useState<{ id: string; subject: string; bodyHtml: string } | null>(null)
+  const [loadingLogBodyId, setLoadingLogBodyId] = useState<string | null>(null)
 
   // Deep-link support: home quick links open a specific tab. The retired
   // Schools tab deep-links to Institutions — schools now live inside each
@@ -235,6 +240,9 @@ export default function PlatformAdminView() {
     departmentId: '',
     schoolId: '',
   })
+  // Password reveal toggles for the add / edit staff dialogs.
+  const [showNewPw, setShowNewPw] = useState(false)
+  const [showEditPw, setShowEditPw] = useState(false)
 
   // Provisioning form state
   const [formData, setFormData] = useState<InstitutionInput>({
@@ -605,6 +613,7 @@ export default function PlatformAdminView() {
   // Load audit logs
   const handleOpenLogs = async () => {
     setLogsOpen(true)
+    setLogBody(null)
     setLoadingLogs(true)
     try {
       const res = await api<{ logs: any[] }>('/api/platform/logs')
@@ -613,6 +622,21 @@ export default function PlatformAdminView() {
       toast.error(getErrorMessage(e))
     } finally {
       setLoadingLogs(false)
+    }
+  }
+
+  // Fetch the rendered HTML body of one outbox email for preview.
+  const viewLogBody = async (logId: string) => {
+    setLoadingLogBodyId(logId)
+    try {
+      const res = await api<{ id: string; subject: string; bodyHtml: string }>(
+        `/api/platform/logs?id=${encodeURIComponent(logId)}`
+      )
+      setLogBody(res)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setLoadingLogBodyId(null)
     }
   }
 
@@ -626,12 +650,27 @@ export default function PlatformAdminView() {
 
     setSaving(true)
     try {
-      await api('/api/platform/users', {
+      const res = await api<{
+        user: User
+        emailStatus?: 'SENT' | 'SIMULATED' | 'FAILED'
+        emailError?: string | null
+      }>('/api/platform/users', {
         method: 'POST',
         body: JSON.stringify(newUserData),
       })
-      toast.success(`User ${newUserData.email} created successfully`)
+      if (res.emailStatus === 'SENT') {
+        toast.success(`User ${newUserData.email} created — sign-in details emailed`)
+      } else if (res.emailStatus === 'SIMULATED') {
+        toast.info(
+          `User ${newUserData.email} created — no SMTP configured, credentials email recorded in Outbox Audit`
+        )
+      } else {
+        toast.warning(
+          `User ${newUserData.email} created, but the credentials email failed — share the password manually (see Outbox Audit)`
+        )
+      }
       setAddUserOpen(false)
+      setShowNewPw(false)
       setNewUserData({
         name: '',
         email: '',
@@ -1799,7 +1838,13 @@ export default function PlatformAdminView() {
       </Dialog>
 
       {/* ---------- MODAL: Add User to Platform ---------- */}
-      <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+      <Dialog
+        open={addUserOpen}
+        onOpenChange={(open) => {
+          setAddUserOpen(open)
+          if (open) setShowNewPw(false)
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Add User to Platform</DialogTitle>
@@ -1937,13 +1982,25 @@ export default function PlatformAdminView() {
 
               <div className="space-y-1">
                 <Label className="text-xs">Initial Password <span className="text-destructive">*</span></Label>
-                <Input
-                  type="password"
-                  value={newUserData.password}
-                  onChange={(e) => setNewUserData((p) => ({ ...p, password: e.target.value }))}
-                  placeholder="Min 6 characters"
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    type={showNewPw ? 'text' : 'password'}
+                    value={newUserData.password}
+                    onChange={(e) => setNewUserData((p) => ({ ...p, password: e.target.value }))}
+                    placeholder="Min 6 characters"
+                    className="pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPw((v) => !v)}
+                    className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    aria-label={showNewPw ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showNewPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1960,7 +2017,15 @@ export default function PlatformAdminView() {
       </Dialog>
 
       {/* ---------- MODAL: Manage User (Role / Institution / Password) ---------- */}
-      <Dialog open={!!editUserTarget} onOpenChange={(open) => !open && setEditUserTarget(null)}>
+      <Dialog
+        open={!!editUserTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditUserTarget(null)
+            setShowEditPw(false)
+          }
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Manage User: {editUserTarget?.name}</DialogTitle>
@@ -2088,12 +2153,24 @@ export default function PlatformAdminView() {
                   <KeyRound className="h-3.5 w-3.5 text-primary" />
                   Reset Password (leave empty to keep current)
                 </Label>
-                <Input
-                  type="password"
-                  placeholder="Enter new password (optional)"
-                  value={editUserData.password}
-                  onChange={(e) => setEditUserData((p) => ({ ...p, password: e.target.value }))}
-                />
+                <div className="relative">
+                  <Input
+                    type={showEditPw ? 'text' : 'password'}
+                    placeholder="Enter new password (optional)"
+                    className="pr-10"
+                    value={editUserData.password}
+                    onChange={(e) => setEditUserData((p) => ({ ...p, password: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPw((v) => !v)}
+                    className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    aria-label={showEditPw ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showEditPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2517,7 +2594,31 @@ export default function PlatformAdminView() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[60vh] overflow-y-auto space-y-2 py-2">
+          {logBody ? (
+            <div className="space-y-2 py-2">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5 text-xs font-semibold"
+                  onClick={() => setLogBody(null)}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" /> Back to log
+                </Button>
+                <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
+                  {logBody.subject}
+                </p>
+              </div>
+              {/* sandbox="" disables scripts/forms inside untrusted email HTML */}
+              <iframe
+                title="Email preview"
+                srcDoc={logBody.bodyHtml}
+                sandbox=""
+                className="h-[52vh] w-full rounded-xl border bg-white"
+              />
+            </div>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto space-y-2 py-2">
             {loadingLogs ? (
               <LoadingBlock label="Loading email logs..." />
             ) : logs.length === 0 ? (
@@ -2530,7 +2631,7 @@ export default function PlatformAdminView() {
                   key={log.id}
                   className="rounded-xl border p-3 bg-card flex items-start justify-between gap-3 text-xs"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-foreground">{log.to}</span>
                       <Badge
@@ -2552,10 +2653,24 @@ export default function PlatformAdminView() {
                       Type: {log.type} · {new Date(log.createdAt).toLocaleString()}
                     </p>
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    title="View email"
+                    onClick={() => viewLogBody(log.id)}
+                  >
+                    {loadingLogBodyId === log.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </Button>
                 </div>
               ))
             )}
-          </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

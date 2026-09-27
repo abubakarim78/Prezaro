@@ -12,6 +12,7 @@ import {
   zodMessage,
 } from '../../_lib/helpers'
 import { notifyUsers } from '../../_lib/notify'
+import { sendAppEmail, staffAccountEmailHtml } from '@/lib/email'
 import type { User } from '@/lib/types'
 
 // DEAN is assignable: a school head is homed to a school, everyone else to a
@@ -191,7 +192,48 @@ export async function POST(req: Request) {
       view: 'home',
     })
 
-    return NextResponse.json({ user: platformUserDTO(newUser) }, { status: 201 })
+    // Email the sign-in credentials. sendAppEmail never throws — without
+    // SMTP it records the rendered email as SIMULATED in the outbox.
+    const roleLabelText =
+      role === 'ADMIN'
+        ? 'Head of Department'
+        : role === 'DEAN'
+          ? 'Dean / School Head'
+          : role === 'SUPERADMIN'
+            ? 'Platform Super Admin'
+            : 'Lecturer'
+    const placementName = newUser.department?.name ?? newUser.school?.name ?? null
+    const institutionName =
+      newUser.institution?.name ??
+      newUser.department?.institution?.name ??
+      newUser.school?.institution?.name ??
+      null
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL || req.headers.get('origin') || 'https://prezaro.com'
+    const emailResult = await sendAppEmail({
+      to: email,
+      subject: `Your Prezaro ${roleLabelText} account is ready`,
+      html: staffAccountEmailHtml(
+        name,
+        email,
+        password,
+        roleLabelText,
+        institutionName,
+        placementName,
+        appUrl,
+      ),
+      type: 'WELCOME',
+      meta: { userId: newUser.id, role },
+    })
+
+    return NextResponse.json(
+      {
+        user: platformUserDTO(newUser),
+        emailStatus: emailResult.status,
+        emailError: emailResult.error,
+      },
+      { status: 201 },
+    )
   })
 }
 
