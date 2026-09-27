@@ -61,30 +61,50 @@ export async function GET(req: Request) {
 const createDeptSchema = z.object({
   name: z.string().trim().min(2, 'Department name must be at least 2 characters').max(100),
   code: z.string().trim().min(1, 'Department code is required').max(10).toUpperCase(),
-  institutionId: z.string().min(1, 'Institution is required'),
+  institutionId: z.string().optional(),
   schoolId: z.string().optional(),
 })
 
 export async function POST(req: Request) {
   return handle(async () => {
     const user = await requireUser(req)
-    if (user.role !== 'SUPERADMIN') {
-      throw new ForbiddenError('Only Super Administrators can create departments')
-    }
-
     const body = await readJson(req)
     const parsed = createDeptSchema.safeParse(body)
     if (!parsed.success) throw new BadRequestError(zodMessage(parsed.error))
 
+    // Superadmins place departments freely. Deans may create departments too,
+    // but only inside their own school — school and institution are derived
+    // from the session and never trusted from the client.
+    let institutionId = parsed.data.institutionId
+    let schoolId: string | undefined = parsed.data.schoolId
+    if (user.role === 'SUPERADMIN') {
+      if (!institutionId) throw new BadRequestError('Institution is required')
+    } else if (user.role === 'DEAN') {
+      if (!user.schoolId) {
+        throw new ForbiddenError('Your account is not linked to a school')
+      }
+      const ownSchool = await db.school.findUnique({ where: { id: user.schoolId } })
+      if (!ownSchool) throw new NotFoundError('Your school no longer exists')
+      if (!ownSchool.institutionId) {
+        throw new BadRequestError(
+          'Your school has no institution assigned yet — ask the platform administrator to link it first'
+        )
+      }
+      institutionId = ownSchool.institutionId
+      schoolId = ownSchool.id
+    } else {
+      throw new ForbiddenError('Only Super Administrators and school Deans can create departments')
+    }
+
     // Ensure institution exists
     const inst = await db.institution.findUnique({
-      where: { id: parsed.data.institutionId },
+      where: { id: institutionId },
     })
     if (!inst) throw new NotFoundError('Target institution not found')
 
     // Ensure the target school exists when provided
-    if (parsed.data.schoolId) {
-      const school = await db.school.findUnique({ where: { id: parsed.data.schoolId } })
+    if (schoolId) {
+      const school = await db.school.findUnique({ where: { id: schoolId } })
       if (!school) throw new NotFoundError('Target school not found')
     }
 
@@ -92,7 +112,7 @@ export async function POST(req: Request) {
     const existing = await db.department.findFirst({
       where: {
         name: parsed.data.name,
-        institutionId: parsed.data.institutionId,
+        institutionId,
       },
     })
     if (existing) {
@@ -103,8 +123,8 @@ export async function POST(req: Request) {
       data: {
         name: parsed.data.name,
         code: parsed.data.code,
-        institutionId: parsed.data.institutionId,
-        ...(parsed.data.schoolId ? { schoolId: parsed.data.schoolId } : {}),
+        institutionId,
+        ...(schoolId ? { schoolId } : {}),
       },
       include: {
         institution: { select: { id: true, name: true, code: true } },

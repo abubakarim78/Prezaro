@@ -109,6 +109,16 @@ export default function SchoolView() {
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null)
   const [sendingEmailCodeId, setSendingEmailCodeId] = useState<string | null>(null)
 
+  // Add-department dialog — Deans create departments inside their own school;
+  // the server derives school/institution from the session.
+  const [addDeptOpen, setAddDeptOpen] = useState(false)
+  const [newDeptName, setNewDeptName] = useState('')
+  const [newDeptCode, setNewDeptCode] = useState('')
+  // Tracks manual edits to the code field so name-typing only auto-suggests
+  // the acronym while the Dean hasn't customized it.
+  const [deptCodeTouched, setDeptCodeTouched] = useState(false)
+  const [creatingDept, setCreatingDept] = useState(false)
+
   // School enrollment link scoping — the Dean shares one link per class/level
   // for the current term (or an explicit term override), so students land on
   // a pre-filtered course list.
@@ -261,6 +271,34 @@ export default function SchoolView() {
       void loadCodes()
     } catch (e) {
       toast.error(getErrorMessage(e))
+    }
+  }
+
+  // Create a department inside the Dean's own school.
+  const handleCreateDepartment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newDeptName.trim() || !newDeptCode.trim()) {
+      toast.error('Please enter the department name and code')
+      return
+    }
+    setCreatingDept(true)
+    try {
+      await api('/api/departments', {
+        method: 'POST',
+        body: { name: newDeptName.trim(), code: newDeptCode.trim().toUpperCase() },
+      })
+      toast.success(`Department "${newDeptName}" created in your school`)
+      setAddDeptOpen(false)
+      setNewDeptName('')
+      setNewDeptCode('')
+      setDeptCodeTouched(false)
+      void loadDepartments()
+      void loadCatalog()
+      setTick((t) => t + 1)
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setCreatingDept(false)
     }
   }
 
@@ -469,7 +507,7 @@ export default function SchoolView() {
                 <LoadingBlock label="Checking course mounting…" />
               ) : readiness.length === 0 ? (
                 <p className="border-t px-4 py-4 text-xs text-muted-foreground">
-                  No departments yet — ask the platform administrator to add them before sharing the link.
+                  No departments yet — add one from the Departments card below before sharing the link.
                 </p>
               ) : (
                 <div className="divide-y border-t">
@@ -568,9 +606,25 @@ export default function SchoolView() {
             <div className="rounded-2xl border bg-card">
               <div className="flex items-center justify-between gap-2 p-4 pb-3">
                 <p className="text-sm font-semibold tracking-tight">Departments in your school</p>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTick((t) => t + 1)} title="Refresh">
-                  <RefreshCw className="h-4 w-4 text-muted-foreground" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs font-semibold"
+                    onClick={() => {
+                      setNewDeptName('')
+                      setNewDeptCode('')
+                      setDeptCodeTouched(false)
+                      setAddDeptOpen(true)
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setTick((t) => t + 1)} title="Refresh">
+                    <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
               </div>
               {deptsLoading ? (
                 <LoadingBlock label="Loading departments…" />
@@ -592,7 +646,7 @@ export default function SchoolView() {
                   <EmptyState
                     icon={Building2}
                     title="No departments yet"
-                    description="Departments appear here once the platform administrator adds them to your school."
+                    description="No departments yet — tap Add to create the first one in your school."
                   />
                 </div>
               ) : (
@@ -974,6 +1028,75 @@ export default function SchoolView() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- MODAL: Add Department (Dean creates inside their own school) ---------- */}
+      <Dialog open={addDeptOpen} onOpenChange={setAddDeptOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Department</DialogTitle>
+            <DialogDescription>
+              Creates the department inside {user?.schoolName ?? 'your school'} — HoDs and lecturers
+              can then be invited into it from the Access tab.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateDepartment} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Department Name <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={newDeptName}
+                onChange={(e) => {
+                  const name = e.target.value
+                  // Suggest an acronym from the name's initials, editable below.
+                  const initials = name
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .map((w) => w[0])
+                    .join('')
+                    .toUpperCase()
+                    .slice(0, 6)
+                  setNewDeptName(name)
+                  // Keep the acronym in sync until the Dean edits the code field.
+                  if (!deptCodeTouched) setNewDeptCode(initials)
+                }}
+                placeholder="e.g. Biomedical Sciences & Diagnostics"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Department Code / Acronym <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={newDeptCode}
+                onChange={(e) => {
+                  setDeptCodeTouched(true)
+                  setNewDeptCode(e.target.value.toUpperCase())
+                }}
+                placeholder="e.g. BMS"
+                required
+              />
+            </div>
+
+            <p className="text-[11px] text-muted-foreground">
+              The department joins your school automatically — its courses need mounting before it
+              appears in the enrollment link flow.
+            </p>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setAddDeptOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingDept}>
+                {creatingDept ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Department'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

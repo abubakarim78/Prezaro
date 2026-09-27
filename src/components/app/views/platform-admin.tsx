@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   Building2,
   Check,
+  ChevronLeft,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -19,20 +20,16 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings2,
   Shield,
-  ShieldAlert,
   ShieldCheck,
   Sliders,
   SlidersHorizontal,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   Trash2,
+  TriangleAlert,
   UserCog,
   UserPlus,
   Users,
-  Wifi,
   Zap,
 } from 'lucide-react'
 import type {
@@ -81,7 +78,6 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import {
   PageHeader,
@@ -129,6 +125,8 @@ const ROLE_BADGES: Record<Role, { label: string; className: string }> = {
   },
 }
 
+const ROLE_ORDER: Record<Role, number> = { DEAN: 0, ADMIN: 1, LECTURER: 2, SUPERADMIN: 3 }
+
 export default function PlatformAdminView() {
   const { user, navigate, params } = useAppStore()
 
@@ -150,31 +148,39 @@ export default function PlatformAdminView() {
   const [schools, setSchools] = useState<School[]>([])
   const [addSchoolOpen, setAddSchoolOpen] = useState(false)
   const [newSchoolData, setNewSchoolData] = useState({ name: '', code: '', institutionId: '' })
-  const [manageSchool, setManageSchool] = useState<School | null>(null)
+
+  // Institution drill-down: each institution gets its own management page —
+  // schools, departments, deans/HoDs and enrollment links in one place.
+  const [selectedInstId, setSelectedInstId] = useState<string | null>(null)
+
+  // Invite Dean dialog (one school at a time)
+  const [deanSchool, setDeanSchool] = useState<School | null>(null)
   const [deanName, setDeanName] = useState('')
   const [deanEmail, setDeanEmail] = useState('')
   const [invitingDean, setInvitingDean] = useState(false)
+  const [deanResult, setDeanResult] = useState<{ code: string; emailed: boolean } | null>(null)
 
-  // Scoped school enrollment link (level/term) for the manage-school sheet
-  const [schoolLinkLevel, setSchoolLinkLevel] = useState('any')
-  const [schoolLinkTerm, setSchoolLinkTerm] = useState('current')
+  // Enrollment-link dialog: pick a school, optionally scope level/term, copy.
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkSchoolId, setLinkSchoolId] = useState('')
+  const [linkLevel, setLinkLevel] = useState('any')
+  const [linkTerm, setLinkTerm] = useState('current')
 
-  // Builds the (optionally scoped) /enroll link for the school being managed.
-  const schoolEnrollUrl = () => {
-    if (typeof window === 'undefined' || !manageSchool) return ''
+  // Assign-institution dialog (unassigned schools; PATCH backfills departments).
+  const [assignSchool, setAssignSchool] = useState<School | null>(null)
+  const [assignInstId, setAssignInstId] = useState('')
+  const [savingSchoolInstitution, setSavingSchoolInstitution] = useState(false)
+
+  // Builds the (optionally scoped) /enroll link for a school.
+  const buildEnrollUrl = (school: School, level: string, term: string) => {
+    if (typeof window === 'undefined') return ''
     const params = new URLSearchParams()
-    params.set('school', manageSchool.code || manageSchool.id)
-    if (schoolLinkLevel !== 'any') params.set('level', schoolLinkLevel)
-    if (schoolLinkTerm !== 'current') params.set('semester', schoolLinkTerm)
+    params.set('school', school.code || school.id)
+    if (level !== 'any') params.set('level', level)
+    if (term !== 'current') params.set('semester', term)
     const qs = params.toString()
     return `${window.location.origin}/enroll?${qs}`
   }
-  // Term labels/count follow the school's institution mode (Semester 2 / Trimester 3).
-  const schoolTermMeta = termSystemMeta(manageSchool?.termSystem)
-  const [deanResult, setDeanResult] = useState<{ code: string; emailed: boolean } | null>(null)
-  // Assigned-institution editing inside the Manage School sheet (PATCH backfills departments).
-  const [schoolInstitutionId, setSchoolInstitutionId] = useState('')
-  const [savingSchoolInstitution, setSavingSchoolInstitution] = useState(false)
 
   // Institutions Filters & search
   const [search, setSearch] = useState('')
@@ -188,14 +194,14 @@ export default function PlatformAdminView() {
   const [logs, setLogs] = useState<any[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
 
-  // Deep-link support: home quick links open a specific tab…
+  // Deep-link support: home quick links open a specific tab. The retired
+  // Schools tab deep-links to Institutions — schools now live inside each
+  // institution's own page.
   const [activeTab, setActiveTab] = useState(() =>
-    params.tab === 'schools' || params.tab === 'users' || params.tab === 'policies'
-      ? params.tab
-      : 'institutions'
+    params.tab === 'users' || params.tab === 'policies' ? params.tab : 'institutions'
   )
 
-  // ---------- Create-department dialog (opened from the Manage School sheet) ----------
+  // ---------- Create-department dialog (quick actions + per-school cards) ----------
   const [addDeptOpen, setAddDeptOpen] = useState(false)
   const [newDeptData, setNewDeptData] = useState({
     name: '',
@@ -203,6 +209,9 @@ export default function PlatformAdminView() {
     institutionId: '',
     schoolId: '',
   })
+  // Tracks manual edits to the code field so name-typing only auto-suggests
+  // the acronym while the admin hasn't customized it.
+  const [deptCodeTouched, setDeptCodeTouched] = useState(false)
 
   // User modals state
   const [addUserOpen, setAddUserOpen] = useState(false)
@@ -277,9 +286,19 @@ export default function PlatformAdminView() {
     loadData()
   }, [loadData])
 
-  // …and straight into the Provision / Outbox Audit dialogs.
+  // …and straight into the Provision / Create School / Create Department /
+  // Outbox Audit dialogs.
   useEffect(() => {
     if (params.provision === '1') setCreateOpen(true)
+    if (params.createSchool === '1') {
+      setNewSchoolData({ name: '', code: '', institutionId: '' })
+      setAddSchoolOpen(true)
+    }
+    if (params.createDept === '1') {
+      setNewDeptData({ name: '', code: '', institutionId: '', schoolId: '' })
+      setDeptCodeTouched(false)
+      setAddDeptOpen(true)
+    }
     if (params.openLogs === '1') {
       setLogsOpen(true)
       setLoadingLogs(true)
@@ -288,7 +307,7 @@ export default function PlatformAdminView() {
         .catch((e: unknown) => toast.error(getErrorMessage(e)))
         .finally(() => setLoadingLogs(false))
     }
-  }, [params.openLogs, params.provision])
+  }, [params.openLogs, params.provision, params.createSchool, params.createDept])
 
   // Filtered institutions
   const filteredInstitutions = useMemo(() => {
@@ -321,6 +340,27 @@ export default function PlatformAdminView() {
     })
   }, [platformUsers, userSearch, userRoleFilter, userInstFilter])
 
+  // ---------- Derived: institution-scoped slices for the drill-down page ----------
+  const selectedInst = useMemo(
+    () => institutions.find((i) => i.id === selectedInstId) ?? null,
+    [institutions, selectedInstId]
+  )
+  const unassignedSchools = useMemo(() => schools.filter((s) => !s.institutionId), [schools])
+  const instSchools = useMemo(
+    () => (selectedInstId ? schools.filter((s) => s.institutionId === selectedInstId) : []),
+    [schools, selectedInstId]
+  )
+  const instDepartments = useMemo(
+    () => (selectedInstId ? departments.filter((d) => d.institutionId === selectedInstId) : []),
+    [departments, selectedInstId]
+  )
+  const instStaff = useMemo(
+    () => (selectedInstId ? platformUsers.filter((u) => u.institutionId === selectedInstId) : []),
+    [platformUsers, selectedInstId]
+  )
+  // School picked inside the enrollment-link dialog.
+  const linkSchool = schools.find((s) => s.id === linkSchoolId) ?? null
+
   // Department actions
   const handleCreateDepartment = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -342,6 +382,7 @@ export default function PlatformAdminView() {
       toast.success(`Department "${newDeptData.name}" created successfully`)
       setAddDeptOpen(false)
       setNewDeptData({ name: '', code: '', institutionId: '', schoolId: '' })
+      setDeptCodeTouched(false)
       loadData(true)
     } catch (e) {
       toast.error(getErrorMessage(e))
@@ -378,30 +419,43 @@ export default function PlatformAdminView() {
     }
   }
 
-  const openSchoolDrawer = (s: School) => {
-    setManageSchool(s)
+  // Focused dialogs replace the old manage-school drawer — one action each.
+  const openDeanInvite = (s: School) => {
+    setDeanSchool(s)
     setDeanResult(null)
     setDeanName('')
     setDeanEmail('')
-    setSchoolInstitutionId(s.institutionId ?? '')
+  }
+
+  const openEnrollLink = (s?: School) => {
+    setLinkSchoolId(s?.id ?? schools[0]?.id ?? '')
+    setLinkLevel('any')
+    setLinkTerm('current')
+    setLinkOpen(true)
+  }
+
+  const openAssignSchool = (s: School) => {
+    setAssignSchool(s)
+    setAssignInstId(s.institutionId ?? '')
   }
 
   // Open the department-create dialog preconfigured for this school.
   const openDeptDialogForSchool = (s: School) => {
     setNewDeptData({ name: '', code: '', institutionId: s.institutionId || '', schoolId: s.id })
+    setDeptCodeTouched(false)
     setAddDeptOpen(true)
   }
 
   const handleInviteDean = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!manageSchool) return
+    if (!deanSchool) return
     setInvitingDean(true)
     try {
       const res = await api<{ code: AccessCode }>('/api/departments/codes', {
         method: 'POST',
         body: {
           role: 'DEAN',
-          schoolId: manageSchool.id,
+          schoolId: deanSchool.id,
           designatedName: deanName.trim() || undefined,
           designatedEmail: deanEmail.trim() || undefined,
           sendEmailImmediately: Boolean(deanEmail.trim()),
@@ -410,7 +464,7 @@ export default function PlatformAdminView() {
         },
       })
       setDeanResult({ code: res.code.code, emailed: Boolean(deanEmail.trim()) })
-      toast.success(`Dean invite code created for ${manageSchool.name}`)
+      toast.success(`Dean invite code created for ${deanSchool.name}`)
     } catch (err) {
       toast.error(getErrorMessage(err))
     } finally {
@@ -421,17 +475,17 @@ export default function PlatformAdminView() {
   // Assign the school's institution via PATCH — the server backfills the
   // school's departments (and transitively their users' institution).
   const handleAssignSchoolInstitution = async () => {
-    if (!manageSchool) return
+    if (!assignSchool) return
     setSavingSchoolInstitution(true)
     try {
       const res = await api<{ school: School; departmentsBackfilled: number }>(
-        `/api/platform/schools/${manageSchool.id}`,
+        `/api/platform/schools/${assignSchool.id}`,
         {
           method: 'PATCH',
-          body: { institutionId: schoolInstitutionId || null },
+          body: { institutionId: assignInstId || null },
         }
       )
-      setManageSchool(res.school)
+      setAssignSchool(null)
       toast.success(
         res.departmentsBackfilled > 0
           ? `Institution assigned — ${res.departmentsBackfilled} department${res.departmentsBackfilled === 1 ? '' : 's'} linked`
@@ -702,6 +756,387 @@ export default function PlatformAdminView() {
       />
 
       <div className="px-4 lg:px-8 space-y-6">
+        {selectedInst ? (
+          <>
+            {/* ---------- INSTITUTION PAGE: one tenant, everything in one place ---------- */}
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 -ml-2 text-xs text-muted-foreground"
+                onClick={() => setSelectedInstId(null)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                All institutions
+              </Button>
+
+              {/* Institution header — identity, plan, live status */}
+              <div className="rounded-2xl border bg-card p-5 shadow-xs space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-semibold tracking-tight truncate">
+                        {selectedInst.name}
+                      </h2>
+                      <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0">
+                        {selectedInst.code}
+                      </Badge>
+                      <Badge
+                        className={cn(
+                          'text-[11px] font-medium border',
+                          (PLAN_BADGES[selectedInst.plan] || PLAN_BADGES.TRIAL).className
+                        )}
+                      >
+                        {(PLAN_BADGES[selectedInst.plan] || PLAN_BADGES.TRIAL).label}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+                      slug: <span className="text-foreground font-medium">{selectedInst.slug}</span>
+                      {selectedInst.contactEmail ? ` · ${selectedInst.contactEmail}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Switch
+                      checked={selectedInst.status === 'ACTIVE'}
+                      onCheckedChange={() => handleToggleStatus(selectedInst)}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {selectedInst.status === 'ACTIVE' ? 'Active' : 'Suspended'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
+                    <GraduationCap className="h-3 w-3 text-primary" />
+                    {termSystemMeta(selectedInst.termSystem).label} System
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
+                    <Shield className="h-3 w-3 text-emerald-600" />
+                    {selectedInst.atRiskThreshold}% Minimum Attendance
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
+                    <Zap className="h-3 w-3 text-amber-600" />
+                    {selectedInst.lateGraceMinutes}m Late Grace
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
+                    <Sparkles className="h-3 w-3 text-purple-600" />
+                    Edge Match: {selectedInst.confidenceThreshold.toFixed(2)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-[11px] font-semibold"
+                    onClick={() => setEditTarget(selectedInst)}
+                  >
+                    <Sliders className="h-3 w-3" />
+                    Adjust Policies & Quotas
+                  </Button>
+                </div>
+
+                {/* Capacity */}
+                <div className="p-3 rounded-xl bg-accent/40 border border-border/50 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Student Capacity Quota</span>
+                    <span className="font-semibold tabular-nums">
+                      {selectedInst.studentCount ?? 0} /{' '}
+                      {selectedInst.maxStudents.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-full transition-all rounded-full',
+                        Math.round(((selectedInst.studentCount ?? 0) / selectedInst.maxStudents) * 100) > 90
+                          ? 'bg-amber-500'
+                          : 'bg-primary'
+                      )}
+                      style={{
+                        width: `${Math.min(100, Math.round(((selectedInst.studentCount ?? 0) / selectedInst.maxStudents) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Scoped stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="Schools" value={String(instSchools.length)} sub="Faculties in tenant" icon={Layers} />
+                <StatCard label="Departments" value={String(instDepartments.length)} sub="Academic units" icon={Building2} />
+                <StatCard label="Students" value={(selectedInst.studentCount ?? 0).toLocaleString()} sub="Enrolled" icon={GraduationCap} />
+                <StatCard label="Staff" value={String(instStaff.length)} sub="Deans, HoDs, lecturers" icon={Users} />
+              </div>
+
+              {/* Scoped quick actions — no digging through settings */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <Button
+                  variant="outline"
+                  className="h-10 gap-2 text-xs font-semibold"
+                  onClick={() => {
+                    setNewSchoolData({ name: '', code: '', institutionId: selectedInst.id })
+                    setAddSchoolOpen(true)
+                  }}
+                >
+                  <Plus className="h-4 w-4 text-primary" /> Create School
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 gap-2 text-xs font-semibold"
+                  onClick={() => {
+                    setNewDeptData({ name: '', code: '', institutionId: selectedInst.id, schoolId: '' })
+                    setDeptCodeTouched(false)
+                    setAddDeptOpen(true)
+                  }}
+                >
+                  <Plus className="h-4 w-4 text-primary" /> Create Department
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 gap-2 text-xs font-semibold"
+                  onClick={() => openEnrollLink()}
+                >
+                  <ExternalLink className="h-4 w-4 text-primary" /> Get Enrollment Link
+                </Button>
+              </div>
+
+              {/* Schools & departments of this institution */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold tracking-tight">Schools & Departments</h3>
+                  <span className="text-xs text-muted-foreground">
+                    {instSchools.length} school{instSchools.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                {instSchools.length === 0 ? (
+                  <div className="rounded-2xl border bg-card">
+                    <EmptyState
+                      icon={Layers}
+                      title="No schools yet"
+                      description="Create the first school/faculty, then add departments and invite its Dean."
+                      action={
+                        <Button
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => {
+                            setNewSchoolData({ name: '', code: '', institutionId: selectedInst.id })
+                            setAddSchoolOpen(true)
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Create School
+                        </Button>
+                      }
+                    />
+                  </div>
+                ) : (
+                  instSchools.map((s) => {
+                    const schoolDepts = instDepartments.filter((d) => d.schoolId === s.id)
+                    const sTermMeta = termSystemMeta(s.termSystem)
+                    return (
+                      <div key={s.id} className="rounded-2xl border bg-card shadow-xs overflow-hidden">
+                        {/* School header */}
+                        <div className="flex items-start justify-between gap-2 p-4 pb-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="font-semibold text-sm tracking-tight truncate">{s.name}</h4>
+                              <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0">
+                                {s.code}
+                              </Badge>
+                              {(s.pendingCount ?? 0) > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                >
+                                  {s.pendingCount} pending approval{(s.pendingCount ?? 0) === 1 ? '' : 's'}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {schoolDepts.length} department{schoolDepts.length === 1 ? '' : 's'} ·{' '}
+                              {sTermMeta.label} {s.currentSemester ?? 1} — enrollment links follow this
+                              calendar
+                            </p>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 text-muted-foreground"
+                                title="School options"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openAssignSchool(s)}>
+                                <Building2 className="h-3.5 w-3.5" />
+                                Move to another institution
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+
+                        {/* Dean row */}
+                        <div className="px-4 pb-3">
+                          {s.deanName ? (
+                            <div className="flex items-center gap-2.5 rounded-xl border bg-accent/30 px-3 py-2.5">
+                              <IdentityAvatar name={s.deanName} className="h-8 w-8" />
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-semibold text-foreground">
+                                  {s.deanName}
+                                </p>
+                                <p className="truncate font-mono text-[10px] text-muted-foreground">
+                                  {s.deanEmail}
+                                </p>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="ml-auto shrink-0 text-[10px] border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400"
+                              >
+                                Dean
+                              </Badge>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => openDeanInvite(s)}
+                              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 py-2.5 text-[11px] font-semibold text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              No Dean assigned — invite one
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Departments in this school */}
+                        {schoolDepts.length > 0 && (
+                          <div className="border-t divide-y">
+                            {schoolDepts.map((d) => (
+                              <div
+                                key={d.id}
+                                className="flex items-center justify-between gap-2 px-4 py-2.5"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-semibold text-foreground">{d.name}</p>
+                                  <p className="font-mono text-[10px] text-muted-foreground">
+                                    {d.code} · {d.studentCount ?? 0} students · {d.courseCount ?? 0}{' '}
+                                    courses
+                                  </p>
+                                </div>
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* School actions */}
+                        <div className="flex flex-wrap gap-2 border-t p-4 pt-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 font-semibold"
+                            onClick={() => openDeptDialogForSchool(s)}
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Add department
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 font-semibold"
+                            onClick={() => openEnrollLink(s)}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" /> Enrollment link
+                          </Button>
+                          {!s.deanName && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="gap-1.5 font-semibold text-primary hover:text-primary"
+                              onClick={() => openDeanInvite(s)}
+                            >
+                              <KeyRound className="h-3.5 w-3.5" /> Invite Dean
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+
+              {/* People of this institution */}
+              <div className="rounded-2xl border bg-card overflow-hidden shadow-xs">
+                <div className="flex items-center justify-between gap-2 p-4 pb-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold tracking-tight">People</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Deans, department heads and lecturers placed in {selectedInst.code}.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 gap-1.5 font-semibold"
+                    onClick={() => {
+                      setNewUserData((prev) => ({
+                        ...prev,
+                        role: 'LECTURER',
+                        institutionId: selectedInst.id,
+                        departmentId: '',
+                        schoolId: '',
+                      }))
+                      setAddUserOpen(true)
+                    }}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" /> Add staff
+                  </Button>
+                </div>
+                {instStaff.length === 0 ? (
+                  <p className="border-t px-4 py-4 text-xs text-muted-foreground">
+                    No staff assigned to this institution yet.
+                  </p>
+                ) : (
+                  <div className="border-t divide-y">
+                    {[...instStaff]
+                      .sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9))
+                      .map((u) => {
+                        const roleMeta = ROLE_BADGES[u.role] || ROLE_BADGES.LECTURER
+                        return (
+                          <div key={u.id} className="flex items-center gap-3 px-4 py-2.5">
+                            <IdentityAvatar name={u.name} className="h-8 w-8 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-foreground">{u.name}</p>
+                              <p className="truncate text-[10px] text-muted-foreground font-mono">{u.email}</p>
+                            </div>
+                            <div className="hidden sm:block min-w-0 max-w-[180px] truncate text-[10px] text-muted-foreground">
+                              {u.role === 'DEAN'
+                                ? u.schoolName ?? 'No school'
+                                : u.departmentName ?? 'No department'}
+                            </div>
+                            <Badge
+                              className={cn('shrink-0 text-[10px] font-medium border', roleMeta.className)}
+                            >
+                              {roleMeta.label}
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="shrink-0 h-8 px-2 text-xs"
+                              onClick={() => openEditUser(u)}
+                            >
+                              <UserCog className="h-3.5 w-3.5" />
+                              Manage
+                            </Button>
+                          </div>
+                        )
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+        <>
         {/* KPI Strip */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-4">
           <StatCard
@@ -734,7 +1169,7 @@ export default function PlatformAdminView() {
 
         {/* Main Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-4 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
+          <TabsList className="flex w-full overflow-x-auto no-scrollbar gap-1 sm:grid sm:grid-cols-3 sm:max-w-2xl bg-muted/60 p-1 rounded-xl">
             <TabsTrigger
               value="institutions"
               className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
@@ -742,14 +1177,6 @@ export default function PlatformAdminView() {
               <Building2 className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">Institutions</span>
               <span className="shrink-0 tabular-nums opacity-80">({institutions.length})</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="schools"
-              className="gap-1.5 min-w-0 shrink-0 text-xs whitespace-nowrap data-[state=active]:bg-primary data-[state=active]:text-primary-foreground dark:data-[state=active]:bg-primary dark:data-[state=active]:text-primary-foreground"
-            >
-              <Layers className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 truncate">Schools</span>
-              <span className="shrink-0 tabular-nums opacity-80">({schools.length})</span>
             </TabsTrigger>
             <TabsTrigger
               value="users"
@@ -809,6 +1236,43 @@ export default function PlatformAdminView() {
                     <SelectItem value="ENTERPRISE">Enterprise</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            {/* Quick actions — the frequent tenant tasks, one tap each */}
+            <div className="rounded-xl border bg-card p-3 shadow-xs space-y-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Quick actions
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Button
+                  variant="outline"
+                  className="h-10 justify-start gap-2 text-xs font-semibold"
+                  onClick={() => {
+                    setNewSchoolData({ name: '', code: '', institutionId: '' })
+                    setAddSchoolOpen(true)
+                  }}
+                >
+                  <Plus className="h-4 w-4 text-primary" /> Create School
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 justify-start gap-2 text-xs font-semibold"
+                  onClick={() => {
+                    setNewDeptData({ name: '', code: '', institutionId: '', schoolId: '' })
+                    setDeptCodeTouched(false)
+                    setAddDeptOpen(true)
+                  }}
+                >
+                  <Plus className="h-4 w-4 text-primary" /> Create Department
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 justify-start gap-2 text-xs font-semibold"
+                  onClick={() => openEnrollLink()}
+                >
+                  <ExternalLink className="h-4 w-4 text-primary" /> Get Enrollment Link
+                </Button>
               </div>
             </div>
 
@@ -908,6 +1372,11 @@ export default function PlatformAdminView() {
                             <Sparkles className="h-3 w-3 text-purple-600" />
                             Edge Match: {inst.confidenceThreshold.toFixed(2)}
                           </span>
+                          <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-muted-foreground font-medium">
+                            <Layers className="h-3 w-3 text-indigo-500" />
+                            {schools.filter((s) => s.institutionId === inst.id).length} schools ·{' '}
+                            {inst.departmentCount ?? 0} departments
+                          </span>
                         </div>
                       </div>
 
@@ -924,13 +1393,12 @@ export default function PlatformAdminView() {
                         </div>
 
                         <Button
-                          variant="secondary"
                           size="sm"
-                          onClick={() => setEditTarget(inst)}
-                          className="gap-2 text-xs font-medium"
+                          onClick={() => setSelectedInstId(inst.id)}
+                          className="gap-2 text-xs font-semibold"
                         >
-                          <Sliders className="h-3.5 w-3.5" />
-                          Adjust Policies & Quotas
+                          Manage Institution
+                          <ChevronRight className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </motion.div>
@@ -940,123 +1408,46 @@ export default function PlatformAdminView() {
             )}
           </TabsContent>
 
-          {/* TAB 2: Schools Layer (Institution → School → Department) */}
-          <TabsContent value="schools" className="mt-4 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between rounded-xl border bg-card p-3 shadow-xs">
-              <p className="text-xs text-muted-foreground max-w-md">
-                Schools sit between institutions and departments. Each school gets a{' '}
-                <strong className="text-foreground">Dean</strong> who approves all its enrollment
-                submissions and invites department HoDs.
-              </p>
-              <Button
-                onClick={() => setAddSchoolOpen(true)}
-                size="sm"
-                className="gap-1.5 h-9 text-xs font-semibold shrink-0"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Create School
-              </Button>
-            </div>
-
-            {schools.length === 0 ? (
-              <EmptyState
-                icon={Layers}
-                title="No schools yet"
-                description="Create a school/faculty, then invite a Dean and add departments inside it."
-                action={
-                  <Button onClick={() => setAddSchoolOpen(true)} size="sm" className="gap-1.5 mt-2">
-                    <Plus className="h-3.5 w-3.5" /> Create School
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="rounded-2xl border bg-card overflow-hidden shadow-xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-muted/50 border-b text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="py-3 px-4">School</th>
-                        <th className="py-3 px-4">Institution</th>
-                        <th className="py-3 px-4">Dean / Head</th>
-                        <th className="py-3 px-4">Metrics</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {schools.map((s) => (
-                        <tr key={s.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="py-3 px-4">
-                            <div className="font-semibold text-foreground">{s.name}</div>
-                            <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                              {s.code}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1.5 font-medium text-foreground">
-                              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span>{s.institutionName || 'Unassigned'}</span>
-                            </div>
-                            {s.institutionCode && (
-                              <p className="text-[10px] text-muted-foreground font-mono">{s.institutionCode}</p>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            {s.deanName ? (
-                              <div className="min-w-0">
-                                <p className="font-medium text-foreground truncate">{s.deanName}</p>
-                                <p className="text-[10px] text-muted-foreground font-mono truncate">
-                                  {s.deanEmail}
-                                </p>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => openSchoolDrawer(s)}
-                                className="text-[11px] font-medium text-amber-600 hover:underline"
-                                title="Open school to invite a Dean"
-                              >
-                                Not assigned — invite
-                              </button>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                              <span>
-                                <strong className="text-foreground">{s.departmentCount ?? 0}</strong> departments
-                              </span>
-                              <span>·</span>
-                              <span>
-                                <strong
-                                  className={cn(
-                                    'tabular-nums',
-                                    (s.pendingCount ?? 0) > 0 ? 'text-amber-600' : 'text-foreground'
-                                  )}
-                                >
-                                  {s.pendingCount ?? 0}
-                                </strong>{' '}
-                                pending approvals
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openSchoolDrawer(s)}
-                              className="h-8 gap-1.5 px-2 text-xs font-semibold text-primary hover:text-primary"
-                              title="Manage school"
-                            >
-                              <Settings2 className="h-3.5 w-3.5" />
-                              Manage
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* Schools that no institution claims — surfaced here so the
+                institution pages stay the single home for school management. */}
+            {unassignedSchools.length > 0 && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <TriangleAlert className="h-4 w-4 shrink-0 text-amber-600" />
+                  <p className="text-sm font-semibold tracking-tight">
+                    {unassignedSchools.length} school{unassignedSchools.length === 1 ? '' : 's'} awaiting
+                    assignment
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  These schools are not linked to an institution yet — assign them so they appear on the
+                  institution&apos;s own page.
+                </p>
+                <div className="space-y-1.5">
+                  {unassignedSchools.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between gap-2 rounded-xl border bg-card px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-foreground">{s.name}</p>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {s.code} · {s.departmentCount ?? 0} departments
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-1.5 text-xs font-semibold"
+                        onClick={() => openAssignSchool(s)}
+                      >
+                        <Building2 className="h-3.5 w-3.5" /> Assign
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
-          </TabsContent>
 
           {/* TAB 3: Users Management across Platform */}
           <TabsContent value="users" className="mt-4 space-y-4">
@@ -1291,6 +1682,8 @@ export default function PlatformAdminView() {
             </div>
           </TabsContent>
         </Tabs>
+        </>
+        )}
       </div>
 
       {/* ---------- MODAL: Create Department ---------- */}
@@ -1322,7 +1715,8 @@ export default function PlatformAdminView() {
                     setNewDeptData((p) => ({
                       ...p,
                       name,
-                      code: p.code ? p.code : initials,
+                      // Keep the acronym in sync until the admin edits the code field.
+                      code: deptCodeTouched ? p.code : initials,
                     }))
                   }}
                   placeholder="e.g. Biomedical Sciences & Diagnostics"
@@ -1334,7 +1728,10 @@ export default function PlatformAdminView() {
                 <Label className="text-xs">Department Code / Acronym <span className="text-destructive">*</span></Label>
                 <Input
                   value={newDeptData.code}
-                  onChange={(e) => setNewDeptData((p) => ({ ...p, code: e.target.value.toUpperCase() }))}
+                  onChange={(e) => {
+                    setDeptCodeTouched(true)
+                    setNewDeptData((p) => ({ ...p, code: e.target.value.toUpperCase() }))
+                  }}
                   placeholder="e.g. BMS"
                   required
                 />
@@ -2162,295 +2559,241 @@ export default function PlatformAdminView() {
         </DialogContent>
       </Dialog>
 
-      {/* ---------- DRAWER: Manage School (Dean invite, departments, enroll link) ---------- */}
-      <Sheet open={manageSchool !== null} onOpenChange={(open) => !open && setManageSchool(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto scrollbar-thin">
-          <SheetHeader className="text-left">
-            <SheetTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-primary" />
-              {manageSchool?.name}
-            </SheetTitle>
-            <p className="text-xs text-muted-foreground">
-              {manageSchool?.code} · {manageSchool?.institutionName || 'No institution'} · Invite the
-              Dean, add departments, and share the school enrollment link.
-            </p>
-          </SheetHeader>
+      {/* ---------- MODAL: Invite Dean (one school at a time) ---------- */}
+      <Dialog open={deanSchool !== null} onOpenChange={(open) => !open && setDeanSchool(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Invite Dean — {deanSchool?.name}</DialogTitle>
+            <DialogDescription>
+              Generates a one-time code the Dean claims on /signup to get the School Control console
+              for this school.
+            </DialogDescription>
+          </DialogHeader>
 
-          {manageSchool && (
-            <div className="space-y-6 px-4 pb-8">
-              {/* --- Stats --- */}
-              <section className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border bg-accent/30 p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    Departments
-                  </p>
-                  <p className="text-xl font-bold tabular-nums mt-0.5">
-                    {manageSchool.departmentCount ?? 0}
-                  </p>
-                </div>
-                <div className="rounded-xl border bg-accent/30 p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                    Pending Approvals
-                  </p>
-                  <p
-                    className={cn(
-                      'text-xl font-bold tabular-nums mt-0.5',
-                      (manageSchool.pendingCount ?? 0) > 0 ? 'text-amber-600' : ''
-                    )}
-                  >
-                    {manageSchool.pendingCount ?? 0}
-                  </p>
-                </div>
-              </section>
+          <form onSubmit={handleInviteDean} className="space-y-4 pt-2">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Dean full name (optional)</Label>
+                <Input
+                  value={deanName}
+                  onChange={(e) => setDeanName(e.target.value)}
+                  placeholder="e.g. Prof. Abena Osei"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Dean email — sends the code by email</Label>
+                <Input
+                  type="email"
+                  value={deanEmail}
+                  onChange={(e) => setDeanEmail(e.target.value)}
+                  placeholder="dean@institution.edu"
+                />
+              </div>
+              <Button type="submit" disabled={invitingDean} className="w-full gap-1.5 font-semibold">
+                {invitingDean ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                Generate Dean invite code
+              </Button>
+            </div>
 
-              {/* --- Assigned Institution (PATCH backfills unlinked departments) --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <Building2 className="h-3.5 w-3.5" />
-                  Assigned Institution
-                </h3>
-                <div className="flex gap-2">
-                  <Select
-                    value={schoolInstitutionId}
-                    onValueChange={setSchoolInstitutionId}
-                  >
-                    <SelectTrigger className="h-10 min-w-0 flex-1 text-sm">
-                      <SelectValue placeholder="No institution (unassigned)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {institutions.map((i) => (
-                        <SelectItem key={i.id} value={i.id}>
-                          {i.name} ({i.code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    size="sm"
-                    disabled={savingSchoolInstitution}
-                    onClick={() => void handleAssignSchoolInstitution()}
-                    className="h-10 shrink-0 gap-1.5 font-semibold"
-                  >
-                    {savingSchoolInstitution ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Save
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Assigning an institution also links this school&apos;s departments that have no
-                  institution — fixing their users&apos; institution display and term system.
+            {deanResult && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                <p className="text-[11px] font-semibold text-foreground">
+                  {deanResult.emailed
+                    ? 'Code generated and emailed — it is also shown below.'
+                    : 'Share this code with the new Dean:'}
                 </p>
-              </section>
-
-              {/* --- Current Dean --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Dean / Head
-                </h3>
-                {manageSchool.deanName ? (
-                  <div className="flex items-center gap-2.5 rounded-xl border bg-accent/30 px-3 py-2.5">
-                    <IdentityAvatar name={manageSchool.deanName} className="h-8 w-8" />
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-semibold text-foreground">
-                        {manageSchool.deanName}
-                      </p>
-                      <p className="truncate font-mono text-[10px] text-muted-foreground">
-                        {manageSchool.deanEmail}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
-                    No Dean assigned yet — invite one below.
-                  </p>
-                )}
-              </section>
-
-              {/* --- Invite Dean --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Invite Dean / School Head
-                </h3>
-                <form onSubmit={handleInviteDean} className="space-y-2.5">
-                  <Input
-                    value={deanName}
-                    onChange={(e) => setDeanName(e.target.value)}
-                    placeholder="Dean full name (optional)"
-                    className="h-10 text-sm"
-                  />
-                  <Input
-                    type="email"
-                    value={deanEmail}
-                    onChange={(e) => setDeanEmail(e.target.value)}
-                    placeholder="Dean email — sends the code by email"
-                    className="h-10 text-sm"
-                  />
-                  <Button type="submit" size="sm" disabled={invitingDean} className="w-full gap-1.5 font-semibold">
-                    {invitingDean ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                    Generate Dean invite code
-                  </Button>
-                </form>
-                {deanResult && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-1.5">
-                    <p className="text-[11px] font-semibold text-foreground">
-                      {deanResult.emailed
-                        ? 'Code generated and emailed — it is also shown below.'
-                        : 'Share this code with the new Dean:'}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-2.5 py-1.5 font-mono text-sm font-bold text-primary">
-                        {deanResult.code}
-                      </code>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 gap-1"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(deanResult.code)
-                          toast.success('Invite code copied')
-                        }}
-                      >
-                        <Copy className="h-3.5 w-3.5" /> Copy
-                      </Button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      The Dean claims it on /signup — they get the School Control console and approve
-                      all enrollment submissions for this school.
-                    </p>
-                  </div>
-                )}
-              </section>
-
-              {/* --- Departments in this school --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <GraduationCap className="h-3.5 w-3.5" />
-                  Departments in this school
-                </h3>
-                {departments.filter((d) => d.schoolId === manageSchool.id).length === 0 ? (
-                  <p className="rounded-xl border bg-muted/30 py-3 text-center text-xs text-muted-foreground">
-                    No departments in this school yet.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {departments
-                      .filter((d) => d.schoolId === manageSchool.id)
-                      .map((d) => (
-                        <div
-                          key={d.id}
-                          className="flex items-center justify-between rounded-xl border px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-semibold text-foreground">{d.name}</p>
-                            <p className="font-mono text-[10px] text-muted-foreground">
-                              {d.code} · {d.studentCount ?? 0} students · {d.courseCount ?? 0} courses
-                            </p>
-                          </div>
-                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        </div>
-                      ))}
-                  </div>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full gap-1.5 font-semibold"
-                  onClick={() => openDeptDialogForSchool(manageSchool)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Create department in {manageSchool.code}
-                </Button>
-              </section>
-
-              {/* --- School enrollment link --- */}
-              <section className="space-y-2.5">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  School enrollment link
-                </h3>
-
-                {/* Optional level + term scoping — wraps the link to one cohort */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1 min-w-0">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Level
-                    </label>
-                    <Select value={schoolLinkLevel} onValueChange={setSchoolLinkLevel}>
-                      <SelectTrigger className="h-9 w-full min-w-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="any">Any level</SelectItem>
-                        {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
-                          <SelectItem key={l} value={String(l)}>
-                            Level {l}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Term
-                    </label>
-                    <Select value={schoolLinkTerm} onValueChange={setSchoolLinkTerm}>
-                      <SelectTrigger className="h-9 w-full min-w-0">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="current">
-                          Current ({schoolTermMeta.label} {manageSchool?.currentSemester ?? 1})
-                        </SelectItem>
-                        {Array.from({ length: schoolTermMeta.count }, (_, i) => i + 1).map((n) => (
-                          <SelectItem key={n} value={String(n)}>
-                            {schoolTermMeta.label} {n}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    value={schoolEnrollUrl()}
-                    className="min-w-0 flex-1 font-mono text-xs"
-                  />
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded-lg border bg-background px-2.5 py-1.5 font-mono text-sm font-bold text-primary">
+                    {deanResult.code}
+                  </code>
                   <Button
                     size="sm"
                     variant="outline"
                     className="shrink-0 gap-1"
                     onClick={() => {
-                      void navigator.clipboard.writeText(schoolEnrollUrl())
-                      toast.success('School enrollment link copied')
+                      void navigator.clipboard.writeText(deanResult.code)
+                      toast.success('Invite code copied')
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" /> Copy
                   </Button>
                 </div>
-                {(schoolLinkLevel !== 'any' || schoolLinkTerm !== 'current') ? (
-                  <p className="flex items-start gap-1.5 text-[11px] text-primary">
-                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>
-                      Scoped invite — students land with{' '}
-                      {schoolLinkLevel !== 'any' ? `Level ${schoolLinkLevel}` : 'any level'}
-                      {schoolLinkTerm !== 'current' ? ` · ${schoolTermMeta.label} ${schoolLinkTerm}` : ''}{' '}
-                      preselected and locked, so they see only that cohort&apos;s courses.
-                    </span>
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">
-                    Students opening this link land on the school preselected; they still pick their
-                    level and see only this school&apos;s courses for the current term.
-                  </p>
-                )}
-              </section>
+                <p className="text-[11px] text-muted-foreground">
+                  The Dean claims it on /signup — they get the School Control console and approve all
+                  enrollment submissions for this school.
+                </p>
+              </div>
+            )}
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- MODAL: School Enrollment Link (quick access from anywhere) ---------- */}
+      <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>School enrollment link</DialogTitle>
+            <DialogDescription>
+              Students self-enroll through the Dean&apos;s school-wide link — pick the school, scope it
+              to a cohort if needed, then copy.
+            </DialogDescription>
+          </DialogHeader>
+
+          {schools.length === 0 ? (
+            <p className="rounded-xl border bg-muted/30 px-3 py-4 text-center text-xs text-muted-foreground">
+              No schools yet — create a school first, then share its enrollment link.
+            </p>
+          ) : (
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <Label className="text-xs">School / Faculty</Label>
+                <Select value={linkSchoolId} onValueChange={setLinkSchoolId}>
+                  <SelectTrigger className="w-full min-w-0">
+                    <SelectValue placeholder="Select school" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {schools.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name} ({s.code})
+                        {s.institutionName ? ` — ${s.institutionName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Optional level + term scoping — wraps the link to one cohort */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1 min-w-0">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Level
+                  </label>
+                  <Select value={linkLevel} onValueChange={setLinkLevel}>
+                    <SelectTrigger className="h-9 w-full min-w-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Any level</SelectItem>
+                      {[100, 200, 300, 400, 500, 600, 700, 800].map((l) => (
+                        <SelectItem key={l} value={String(l)}>
+                          Level {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Term
+                  </label>
+                  <Select value={linkTerm} onValueChange={setLinkTerm}>
+                    <SelectTrigger className="h-9 w-full min-w-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="current">
+                        Current ({termSystemMeta(linkSchool?.termSystem).label}{' '}
+                        {linkSchool?.currentSemester ?? 1})
+                      </SelectItem>
+                      {Array.from({ length: termSystemMeta(linkSchool?.termSystem).count }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {termSystemMeta(linkSchool?.termSystem).label} {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Input
+                  readOnly
+                  value={linkSchool ? buildEnrollUrl(linkSchool, linkLevel, linkTerm) : ''}
+                  className="min-w-0 flex-1 font-mono text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 gap-1"
+                  disabled={!linkSchool}
+                  onClick={() => {
+                    if (!linkSchool) return
+                    void navigator.clipboard.writeText(buildEnrollUrl(linkSchool, linkLevel, linkTerm))
+                    toast.success('School enrollment link copied')
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              {(linkLevel !== 'any' || linkTerm !== 'current') ? (
+                <p className="flex items-start gap-1.5 text-[11px] text-primary">
+                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Scoped invite — students land with{' '}
+                    {linkLevel !== 'any' ? `Level ${linkLevel}` : 'any level'}
+                    {linkTerm !== 'current'
+                      ? ` · ${termSystemMeta(linkSchool?.termSystem).label} ${linkTerm}`
+                      : ''}{' '}
+                    preselected and locked, so they see only that cohort&apos;s courses.
+                  </span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Students opening this link land on the school preselected; they still pick their
+                  level and see only this school&apos;s courses for the current term.
+                </p>
+              )}
             </div>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- MODAL: Assign Institution (unassigned schools; PATCH backfills departments) ---------- */}
+      <Dialog open={assignSchool !== null} onOpenChange={(open) => !open && setAssignSchool(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign Institution — {assignSchool?.name}</DialogTitle>
+            <DialogDescription>
+              Linking a school to an institution also links its departments that have no institution —
+              fixing their users&apos; institution display and term system.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Institution</Label>
+              <Select value={assignInstId} onValueChange={setAssignInstId}>
+                <SelectTrigger className="w-full min-w-0">
+                  <SelectValue placeholder="No institution (unassigned)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {institutions.map((i) => (
+                    <SelectItem key={i.id} value={i.id}>
+                      {i.name} ({i.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              disabled={savingSchoolInstitution}
+              onClick={() => void handleAssignSchoolInstitution()}
+              className="w-full gap-1.5 font-semibold"
+            >
+              {savingSchoolInstitution ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Save assignment
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ---------- MODAL: Create School ---------- */}
       <Dialog open={addSchoolOpen} onOpenChange={setAddSchoolOpen}>

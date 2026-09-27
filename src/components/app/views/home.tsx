@@ -15,9 +15,11 @@ import {
   Globe2,
   Mail,
   MapPin,
+  Network,
   Play,
   Plus,
   ScanFace,
+  School,
   UserPlus,
   Users,
   WifiOff,
@@ -213,6 +215,16 @@ export default function HomeView() {
                 icon={Plus}
                 label="Provision Institution"
                 onClick={() => navigate('platform', { tab: 'institutions', provision: '1' })}
+              />
+              <QuickAction
+                icon={School}
+                label="Create School"
+                onClick={() => navigate('platform', { tab: 'institutions', createSchool: '1' })}
+              />
+              <QuickAction
+                icon={Network}
+                label="Create Department"
+                onClick={() => navigate('platform', { tab: 'institutions', createDept: '1' })}
               />
             </div>
 
