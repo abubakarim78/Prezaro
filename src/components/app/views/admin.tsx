@@ -776,7 +776,7 @@ export default function AdminView() {
                                   disabled={isApproving || isRejecting}
                                 >
                                   {isApproving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                                  Accept into {user?.departmentName ?? 'department'}
+                                  Accept
                                 </Button>
                               </>
                             }
